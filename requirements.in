@@ -1,2 +1,9 @@
 networkx
 numpy
+pytket
+pytket-qiskit
+pandas
+stim
+qiskit
+tqdm
+multiprocess
