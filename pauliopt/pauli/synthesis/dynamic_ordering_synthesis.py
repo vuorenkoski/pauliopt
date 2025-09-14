@@ -23,7 +23,7 @@ from tests.pauli.utils import verify_equality
 # This six different single qubit gates are used in the algorithm: I, V, S, VS, SV, SVS(H)
 
 # Time complexity O(m^2 n x) where n is number of qubits and m number of gadgets. X depends on topology: maximum degree of
-# physical qubit (for example in line it is 2 and in grid 4).
+# physical qubit (for example in line it is 2 and in grid 4). max of x is n-1.
 # we have to process m gadgets and n qubits, so n*m
 # Each opearation takes 36*m*x time
 
@@ -79,8 +79,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     debug and print_sorted_gd(gadget_data, order=print_order)
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
-        order = order_gadgets(general_data, gadget_rand_num, random_sel=random_sel)
-        next = order[0][0]
+        next = next_gadget(general_data, gadget_rand_num, random_sel=random_sel)
         qubit_map = make_map_from_gdconns(gdconns, gdconns_degrees, next)
         if qubit_map.number_of_nodes() == 0:
             print('ERROR: qubit map has no nodes')
@@ -89,7 +88,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
         # Loop going through qubits in gadget, removing them one by one
         while qubit_map.number_of_nodes() > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
-            edge, gates = next_edge_to_remove(qubit_map, next, order, general_data, gate_combinations, random_sel=random_sel)
+            edge, gates = next_edge_to_remove(qubit_map, next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
             removed_gadgets_num += rgadgets
             debug and print('-------Next edge to remove:', edge, 'gates:', gates)
@@ -171,12 +170,14 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     perm_gadgets.append(gadget_index)
     gadget_data[qubit,gadget_index] = 'I'
 
-def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combinations, random_sel=False):
+def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations, removed_gadgets_num, random_sel=False):
     """Decide what edge to remove next and what gates to apply"""
     # This version primarily chooses gates which minimizes overall effect to the length of chains. 
     # If there are many options having the same score, it secondarily tries to remove/avoid identity gates from the middle of chains.
     gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
-    edge = None
+    num_qubits, num_gadgets = gadget_data.shape
+
+    # find different option to remove qubit (edge)
     edge_options = []
     for v in qubit_map.nodes():
         if qubit_map.degree[v] == 1:
@@ -186,13 +187,9 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
             if qubit_map.degree[v] == 2:
                 edge_options.append(list(qubit_map.edges(v))[0])
 
+    # find possible gates for each edge option
     edge_gates = []
-    edge_options_left = []
-    edge_excellent = []
-    good_edges_left = len(edge_options)
     for qubit0,qubit1 in edge_options:
-        edge_options_left.append(True)
-        edge_excellent.append(0)
         if gadget_data[qubit1,gadget_index] == 'I': #swap needed
             options = gate_combinations[(gadget_data[qubit0,gadget_index]+gadget_data[qubit1,gadget_index],False,False)]
             edge_gates.append(options)
@@ -200,20 +197,17 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
             options = gate_combinations[(gadget_data[qubit0,gadget_index]+gadget_data[qubit1,gadget_index],True,False)]
             edge_gates.append(options)
 
-    if len(order) == 1: # Only one gadget left, choose any
+    if num_gadgets - removed_gadgets_num == 1: # Only one gadget left, choose any
         return edge_options[0], get_gates(edge_gates[0])[0]
-    g=1
 
     score = np.zeros((len(edge_options),36), dtype=int)
     score_remove_I = np.zeros((len(edge_options),36), dtype=int)
     possibility_to_influence_length = False
-    while g < len(order):
-        gadget = order[g][0]
-        g += 1
+    for gadget in range(num_gadgets): # For each non-removed gadget, check how different edge+gate combinations would affect it
+        if removed_gadgets[gadget]:
+            continue
 
         for e in range(len(edge_options)):
-            if not edge_options_left[e]:
-                continue
             qubit0,qubit1 = edge_options[e]
             gates0 = edge_gates[e]
             qubit0_degree = gdconns_degrees[gadget,qubit0]
@@ -273,43 +267,35 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
                     if intersection & (1<<i):
                         score[e,i] += score_change
 
+    # check best combinations in terms of steiner tree length
     max_score = 0
     max_edge_gates_combination = None
-    if possibility_to_influence_length:
-        for e in range(len(edge_options)):
-            gates = edge_gates[e]
-            for i in range(36):
-                if (gates & (1<<i)) > 0:
-                    if max_edge_gates_combination is None or score[e,i] > max_score:
-                        max_score = score[e,i]
-                        max_edge_gates_combination = [(e, i, score_remove_I[e,i])]
-                    elif score[e,i] == max_score:
-                        max_edge_gates_combination.append((e, i, score_remove_I[e,i]))
-        max_edge_gates_combination.sort(key=lambda x: (-x[2]))
-        best = []
-        max_remove_I = max_edge_gates_combination[0][2]
-        for x in max_edge_gates_combination:
-            if x[2] == max_remove_I:
-                best.append((x[0], x[1]))
-        max_edge_gates_combination = best
-    else:
-        for e in range(len(edge_options)):
-            for i in range(36):
-                if (edge_gates[e] & (1<<i)) > 0:
-                    if max_edge_gates_combination is None or score_remove_I[e,i] > max_score:
-                        max_score = score_remove_I[e,i]
-                        max_edge_gates_combination = [(e, i)]
-                    elif score[e,i] == max_score:
-                        max_edge_gates_combination.append((e, i))
+    for e in range(len(edge_options)):
+        gates = edge_gates[e]
+        for i in range(36):
+            if (gates & (1<<i)) > 0:
+                if max_edge_gates_combination is None or score[e,i] > max_score:
+                    max_score = score[e,i]
+                    max_edge_gates_combination = [(e, i, score_remove_I[e,i])]
+                elif score[e,i] == max_score:
+                    max_edge_gates_combination.append((e, i, score_remove_I[e,i]))
+    max_edge_gates_combination.sort(key=lambda x: (-x[2]))
+
+    # check best combinations in terms of removing I:s from middle of chains
+    best_with_I_removal = []
+    max_remove_I = max_edge_gates_combination[0][2]
+    for x in max_edge_gates_combination:
+        if x[2] == max_remove_I:
+            best_with_I_removal.append((x[0], x[1]))
 
     if random_sel:
-        edge_gates = random.choice(max_edge_gates_combination)
+        edge_gates = random.choice(best_with_I_removal)
     else:
-        edge_gates = max_edge_gates_combination[0]
+        edge_gates = best_with_I_removal[0]
     return edge_options[edge_gates[0]], get_gates(1<<edge_gates[1])[0]
 
 
-def order_gadgets(general_data, gadget_rand_num, random_sel=False):
+def next_gadget(general_data, gadget_rand_num, random_sel=False):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
     gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
@@ -323,7 +309,7 @@ def order_gadgets(general_data, gadget_rand_num, random_sel=False):
         order.sort(key=lambda x: (x[2], x[1], -x[4], x[3]))
     else:
         order.sort(key=lambda x: (x[2], x[1], -x[4], x[0]))
-    return order
+    return order[0][0]
 
 
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets):
