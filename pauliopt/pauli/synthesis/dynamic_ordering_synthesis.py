@@ -85,9 +85,6 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
         
         # Loop going through qubits in gadget, removing them one by one
         while qubit_map.number_of_nodes() > 1:
-            # If this is uncommented, algorithm improves little bit but time increases a lot
-            # order = order_gadgets(general_data, random_sel=random_sel)
-
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates = next_edge_to_remove(qubit_map, next, order, general_data, gate_combinations, random_sel=random_sel)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
@@ -204,8 +201,8 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
         return edge_options[0], get_gates(edge_gates[0])[0]
     g=1
 
-    score = np.zeros((len(edge_options),72), dtype=int)
-    score_remove_I = np.zeros((len(edge_options),72), dtype=int)
+    score = np.zeros((len(edge_options),36), dtype=int)
+    score_remove_I = np.zeros((len(edge_options),36), dtype=int)
     possibility_to_influence_length = False
     while g < len(order):
         gadget = order[g][0]
@@ -225,62 +222,61 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
             if qubit0_degree == 1 or qubit1_degree == 1:
                 possibility_to_influence_length = True
 
+            # Pair is in the middle of branch. Avoid I:s
+            if qubit0_degree > 1 and qubit1_degree > 1:
+                if gadget_data[qubit0,gadget] == 'I' or gadget_data[qubit1,gadget] == 'I':
+                    intersection = gates0 & gate_combinations[(legs,False,False)]
+                    score_change = 1
+                else:
+                    intersection = gates0 & (gate_combinations[(legs,True,False)] | gate_combinations[(legs,False,True)])
+                    score_change = -1
+                if intersection > 0:
+                    for i in range(36):
+                        if intersection & (1<<i):
+                            score_remove_I[e,i] += score_change
+                continue
+
             # Pair is last pair in a brach in this gadget also. Try turn first qubit to I
-            if qubit0_degree == 1 and qubit1_degree > 1:
+            elif qubit0_degree == 1 and qubit1_degree > 1:
                 intersection = gates0 & gate_combinations[(legs,True,False)]
                 if intersection > 0:
                     score_change = 1
 
             # Same situation but reversed
-            if qubit0_degree > 1 and qubit1_degree == 1:
+            elif qubit0_degree > 1 and qubit1_degree == 1:
                 intersection = gates0 & gate_combinations[(legs,False,True)]
                 if intersection > 0:
                     score_change = 1
 
             # Pair is touches last qubit of a branch. Try not to extneded branch
-            if qubit0_degree == 1 and qubit1_degree == 0:
+            elif qubit0_degree == 1 and qubit1_degree == 0:
                 intersection = gates0 & gate_combinations[(legs,False,False)]
                 if intersection > 0:
                     score_change = -1
 
             # Same situation but reversed
-            if qubit0_degree == 0 and qubit1_degree == 1:
+            elif qubit0_degree == 0 and qubit1_degree == 1:
                 intersection = gates0 & gate_combinations[(legs,False, False)]
                 if intersection > 0:
                     score_change = -1
 
-            if qubit0_degree == 1 and qubit1_degree == 1:
+            elif qubit0_degree == 1 and qubit1_degree == 1:
                 intersection = gates0 & (gate_combinations[(legs,False,True)] | gate_combinations[(legs,True,False)])
                 if intersection > 0:
                     score_change = 1
 
             if intersection > 0:
-                for i in range(72):
+                for i in range(36):
                     if intersection & (1<<i):
                         score[e,i] += score_change
-
-            # Pair is in the middle of branch. Avoid I:s
-            if qubit0_degree > 1 and qubit1_degree > 1:
-                if gadget_data[qubit0,gadget] == 'I' or gadget_data[qubit1,gadget] == 'I':
-                    intersection = gates0 & gate_combinations[(legs,False,False)]
-                    if intersection > 0:
-                        for i in range(72):
-                            if intersection & (1<<i):
-                                score_remove_I[e,i] += 1
-                else:
-                    intersection = gates0 & (gate_combinations[(legs,True,False)] | gate_combinations[(legs,False,True)])
-                    if intersection > 0:
-                        for i in range(72):
-                            if intersection & (1<<i):
-                                score_remove_I[e,i] += -1
-
 
     max_score = 0
     max_edge_gates_combination = None
     if possibility_to_influence_length:
         for e in range(len(edge_options)):
-            for i in range(72):
-                if (edge_gates[e] & (1<<i)) > 0:
+            gates = edge_gates[e]
+            for i in range(36):
+                if (gates & (1<<i)) > 0:
                     if max_edge_gates_combination is None or score[e,i] > max_score:
                         max_score = score[e,i]
                         max_edge_gates_combination = [(e, i, score_remove_I[e,i])]
@@ -295,7 +291,7 @@ def next_edge_to_remove(qubit_map, gadget_index, order, general_data, gate_combi
         max_edge_gates_combination = best
     else:
         for e in range(len(edge_options)):
-            for i in range(72):
+            for i in range(36):
                 if (edge_gates[e] & (1<<i)) > 0:
                     if max_edge_gates_combination is None or score_remove_I[e,i] > max_score:
                         max_score = score_remove_I[e,i]
@@ -343,23 +339,27 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         gate1 = first_qubit
         gate2 = second_qubit
     for gate, qubit in [(gate1, qubit1), (gate2, qubit2)]:
-        if gate == apply_h:
-            qc_out.h(qubit)
-            qc_prop.append(H(qubit))
-        elif gate == apply_vdg:
+        if gate == apply_vdg:
             qc_out.v(qubit)
             qc_prop.append(Vdg(qubit))
         elif gate == apply_sdg:
             qc_out.s(qubit)
             qc_prop.append(Sdg(qubit))
-        elif gate == apply_hs:
+        elif gate == apply_vs:
             qc_out.s(qubit)
             qc_prop.append(Sdg(qubit))
-            qc_out.h(qubit)
-            qc_prop.append(H(qubit))
-        elif gate == apply_sh:
-            qc_out.h(qubit)
-            qc_prop.append(H(qubit))
+            qc_out.v(qubit)
+            qc_prop.append(Vdg(qubit))
+        elif gate == apply_sv:
+            qc_out.v(qubit)
+            qc_prop.append(Vdg(qubit))
+            qc_out.s(qubit)
+            qc_prop.append(Sdg(qubit))
+        elif gate == apply_svs:
+            qc_out.s(qubit)
+            qc_prop.append(Sdg(qubit))
+            qc_out.v(qubit)
+            qc_prop.append(Vdg(qubit))
             qc_out.s(qubit)
             qc_prop.append(Sdg(qubit))
     qc_out.cx(qubit1, qubit2)
@@ -580,18 +580,6 @@ def steiner_nodes(gadget_data, gdconns_degrees, gadget_index):
     return steiner_nodes, nodes, min_from_edge
 
 
-def apply_h(p):
-    if p == 'X':
-        return 'Z', 1
-    elif p == 'Z':
-        return 'X', 1
-    elif p == 'Y':
-        return 'Y', -1
-    elif p == 'I':
-        return 'I', 1
-    else:
-        raise ValueError("Invalid Pauli: {}".format(p))
-
 def apply_vdg(p):
     if p == 'X':
         return 'X', 1
@@ -619,15 +607,21 @@ def apply_sdg(p):
 def apply_I(p):
     return p, 1
 
-def apply_hs(p):
+def apply_vs(p):
     pauli,phase1 = apply_sdg(p)
-    pauli,phase2 = apply_h(pauli)
+    pauli,phase2 = apply_vdg(pauli)
     return pauli, phase1*phase2
 
-def apply_sh(p):
-    pauli,phase1 = apply_h(p)
+def apply_sv(p):
+    pauli,phase1 = apply_vdg(p)
     pauli,phase2 = apply_sdg(pauli)
     return pauli, phase1*phase2
+
+def apply_svs(p):
+    pauli,phase1 = apply_sdg(p)
+    pauli,phase2 = apply_vdg(pauli)
+    pauli,phase3 = apply_sdg(pauli)
+    return pauli, phase1*phase2*phase3
 
 def apply_cnot(p1, p2):
     # change I:  XX<->XI, YX<->YI, ZY<->IY, ZZ<->IZ
@@ -680,10 +674,11 @@ def possible_gates(paulis,target0, target1):
     :params target0: True if qubit0 should have I, False if it should not have I
     :params target1: True if qubit1 should have I, False if it should not have I
     :returns: 72-bit integer coding possible gate combinations."""
-    # coding I, V, S, H, SH, HS
-    # HS X->Y, Y->Z, Z->X: first propagate S, then H
-    # SH X->Z, Z->Y, Y->X 
-    gates_none = np.zeros((2,6,6), dtype=object) # cnot reversed: (False, True), q0 ( I, V, S, H, HS, SH), q1 ( I, V, S, H, HS, SH)
+    # CHANGED SO THAT IT RETURNS ONLY 36 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
+    # coding I, V, S, SVS(H), SV, VS
+    # SV X->Y, Y->Z, Z->X: first propagate S, then H
+    # VS X->Z, Z->Y, Y->X 
+    gates_none = np.zeros((2,6,6), dtype=object)
     convert_to_X = {'X': [0,1], 'Y': [2,5], 'Z': [3,4]}
     convert_to_Y = {'X': [2,4], 'Y': [0,3], 'Z': [1,5]}
     convert_to_Z = {'X': [3,5], 'Y': [1,4], 'Z': [0,2]}
@@ -751,12 +746,12 @@ def possible_gates(paulis,target0, target1):
         print('XXXX Should not happen')
 
     options = 0
-    for i, cnot_reversed in enumerate([False, True]):
-        for j, first_qubit in enumerate([None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]):
-            for k, second_qubit in enumerate([None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]):
-                if paulis_options[i,j,k] == 1:
-                    gate = 1 << (i*36 + j*6 + k)
-                    options += gate
+#    for i, cnot_reversed in enumerate([False, True]):
+    for j, first_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
+        for k, second_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
+            if paulis_options[0,j,k] == 1:
+                gate = 1 << (j*6 + k)
+                options += gate
     return options
 
 def get_gates(gate_set):
@@ -764,14 +759,15 @@ def get_gates(gate_set):
     :params gate_set: 72-bit integer coding possible gate combinations.
     :returns: list of tuples (first_qubit_gate, second_qubit_gate, cnot direction).
     """
+    # CHANGED SO THAT IT RETURNS ONLY 36 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
     gates = []
-    for i, cnot_reversed in enumerate([False, True]):
-        for j, first_qubit in enumerate([None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]):
-            for k, second_qubit in enumerate([None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]):
-                gate = 1 << (i*36 + j*6 + k)
-                if gate & gate_set > 0:
-                    gates.append((first_qubit, second_qubit, cnot_reversed))
-                gate >>= 1
+#    for i, cnot_reversed in enumerate([False, True]):
+    for j, first_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
+        for k, second_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
+            gate = 1 << (j*6 + k)
+            if gate & gate_set > 0:
+                gates.append((first_qubit, second_qubit, False))
+            gate >>= 1
     return gates
 
 # Functions for testing and debugging
@@ -795,9 +791,9 @@ def test_possible_gates():
                 for target1 in [False, True]:
                     options = possible_gates((p1, p2), target0, target1)
                     options_test = []
-                    for cnot_reversed in [True, False]:
-                        for first_gate in [None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]:
-                            for second_gate in [None, apply_vdg, apply_sdg, apply_h, apply_hs, apply_sh]:
+                    for cnot_reversed in [False]:
+                        for first_gate in [apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]:
+                            for second_gate in [apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]:
                                 if first_gate is not None:
                                     pauli1, phase = first_gate(p1)
                                 else:
@@ -860,37 +856,16 @@ def check_cdconns_integrity(gdconns, gdconns_degrees, gadget_data, last_edge):
                 print('gadget_data:', gadget_data[:,g])
                 input()
 
-def check_HS_equality():
-    for op11 in [apply_I, apply_h, apply_vdg]:
-        for op12 in [apply_I, apply_h, apply_vdg]:
-            for s2 in [apply_I, apply_sdg]:
-                combination = []
-                for op21 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-                    for op22 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-                        for cnotr in [True, False]:
-                            this_is_ok = True
-                            for p1 in ['X','Y','Z','I']:
-                                for p2 in ['X','Y','Z','I']:
-                                    p11,p12,_ = apply_cnot(op11(p1)[0], s2(op12(p2)[0])[0])
-                                    p21,p22,_ = apply_cnot(op21(p1)[0], op22(p2)[0])
-                                    if cnotr:
-                                        p22,p21,_ = apply_cnot(op22(p2)[0], op21(p1)[0])
-                                    if p11 != p21 or p12 != p22:
-                                        this_is_ok = False
-                            if this_is_ok:
-                                combination.append((op21.__name__, op22.__name__, cnotr))
-                print(op11.__name__, op12.__name__, s2.__name__, '->', combination)
-
 def check_equal_gates():
     print('Check equal gates')
     found = False
-    for op11 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-        for op12 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-            for cnotr1 in [True, False]:
+    for op11 in [apply_I, apply_svs, apply_vdg, apply_sdg, apply_sv, apply_vs]:
+        for op12 in [apply_I, apply_svs, apply_vdg, apply_sdg, apply_sv, apply_vs]:
+            for cnotr1 in [False]:
                 combination = []
-                for op21 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-                    for op22 in [apply_I, apply_h, apply_vdg, apply_sdg, apply_hs, apply_sh]:
-                        for cnotr2 in [True, False]:
+                for op21 in [apply_I, apply_svs, apply_vdg, apply_sdg, apply_sv, apply_vs]:
+                    for op22 in [apply_I, apply_svs, apply_vdg, apply_sdg, apply_sv, apply_vs]:
+                        for cnotr2 in [False]:
                             if op11 == op21 and op12 == op22 and cnotr1 == cnotr2:
                                 continue
                             this_is_ok = True
@@ -934,7 +909,7 @@ def print_sorted_gd(gadget_data, order=None):
         print('')
     print('')
 
-#test_possible_gates()
+test_possible_gates()
 #check_equal_gates()
 #for i in range(72):
 #    print(get_gates(1<<i))
