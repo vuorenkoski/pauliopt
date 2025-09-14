@@ -20,9 +20,12 @@ from tests.pauli.utils import verify_equality
 # Architecture agnostic version: https://arxiv.org/abs/2404.03280
 # This have two major differences: 1) does not consider topology, 2) does not allow ordering
 
-# This has HS and SH possibilities as single qubit gates. So 6*6*2 = 72 possibilities altogether
-# According to above paper we need only 18 different chunks, all of these are in use in this algoritm, but this has more.
-# Paper has better datastructure for gadget_data.
+# This six different single qubit gates are used in the algorithm: I, V, S, VS, SV, SVS(H)
+
+# Time complexity O(m^2 n x) where n is number of qubits and m number of gadgets. X depends on topology: maximum degree of
+# physical qubit (for example in line it is 2 and in grid 4).
+# we have to process m gadgets and n qubits, so n*m
+# Each opearation takes 36*m*x time
 
 def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
@@ -683,9 +686,9 @@ def possible_gates(paulis,target0, target1):
     convert_to_Y = {'X': [2,4], 'Y': [0,3], 'Z': [1,5]}
     convert_to_Z = {'X': [3,5], 'Y': [1,4], 'Z': [0,2]}
 
-    if target0 and target1 and paulis[0] == 'I' and paulis[1] == 'I':   #current and target is II
-        paulis_options = np.ones((2,6,6), dtype=object)  # all gates
-    elif paulis[0] == 'I' and paulis[1] == 'I':                             #current is ??, target is II
+    if target0 and target1 and paulis[0] == 'I' and paulis[1] == 'I':   # current and target is II
+        paulis_options = np.ones((2,6,6), dtype=object)                 # all gates
+    elif paulis[0] == 'I' and paulis[1] == 'I':                         # current is ??, target is II
         paulis_options = gates_none
     elif target0 and target1:  
         paulis_options = gates_none
@@ -909,7 +912,5 @@ def print_sorted_gd(gadget_data, order=None):
         print('')
     print('')
 
-test_possible_gates()
+#test_possible_gates()
 #check_equal_gates()
-#for i in range(72):
-#    print(get_gates(1<<i))
