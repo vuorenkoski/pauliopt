@@ -202,7 +202,6 @@ def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations
 
     score = np.zeros((len(edge_options),36), dtype=int)
     score_remove_I = np.zeros((len(edge_options),36), dtype=int)
-    possibility_to_influence_length = False
     for gadget in range(num_gadgets): # For each non-removed gadget, check how different edge+gate combinations would affect it
         if removed_gadgets[gadget]:
             continue
@@ -215,9 +214,6 @@ def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations
             legs = gadget_data[qubit0,gadget] + gadget_data[qubit1,gadget]
             intersection = 0
             score_change = 0
-
-            if qubit0_degree == 1 or qubit1_degree == 1:
-                possibility_to_influence_length = True
 
             # Pair is in the middle of branch. Avoid I:s
             if qubit0_degree > 1 and qubit1_degree > 1:
