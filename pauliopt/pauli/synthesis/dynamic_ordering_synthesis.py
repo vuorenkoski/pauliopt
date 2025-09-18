@@ -187,11 +187,6 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
     for q in range(num_qubits):
         if gdconns_degrees[gadget_index, q] == 1:
             edge_options.append((q,last_edge[gadget_index,q]))
-#    if len(edge_options) == 0: # current map is cycle (all nodes degrees>1), add edges with degree 2 to edge_options
-#        print('WARNING: qubit map is cycle, adding edges with degree 2 to options')
-#        for v in qubit_map.nodes():
-#            if qubit_map.degree[v] == 2:
-#                edge_options.append(list(qubit_map.edges(v))[0])
 
     # find possible gates for each edge option
     edge_gates = []
@@ -400,9 +395,9 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
     removed_connections = 0
-    for q1 in range(num_qubits):
+    for q1 in range(num_qubits): # Loop trough all 
         # If qubit is not in the end of branch/chain
-        if (q1!=qubit1 or q1!=qubit2) and gdconns_degrees[gadget_index,q1] != 1:
+        if (q1!=qubit1 and q1!=qubit2) or (gdconns_degrees[gadget_index,q1] != 1):
             continue
         q2 = last_edge[gadget_index,q1]
 
@@ -420,7 +415,10 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
                 remove_connection(general_data, gadget_index, qubit1, qubit2)
                 removed_connections += 1
                 last_edge[gadget_index,qubit1] = -1
-                gadget_removed = follow_chain_until_not_I(general_data, gadget_index, qubit2, pauli2)
+                for i in range(num_qubits):
+                    if gdconns[gadget_index,qubit2,i] == 1:
+                        last_edge[gadget_index,qubit2] = i
+                        break
 
         # This gadget has same edge but reversed
         elif q1 == qubit2 and q2 == qubit1: 
@@ -428,7 +426,10 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
                 remove_connection(general_data, gadget_index, qubit1, qubit2)
                 removed_connections += 1
                 last_edge[gadget_index,qubit2] = -1
-                gadget_removed = follow_chain_until_not_I(general_data, gadget_index, qubit1, pauli1)
+                for i in range(num_qubits):
+                    if gdconns[gadget_index,qubit1,i] == 1:
+                        last_edge[gadget_index,qubit1] = i
+                        break
 
         # edge is not and last edge in this gadget, but q1 is the first qubit of cnot
         elif q1 == qubit1:
