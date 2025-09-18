@@ -46,6 +46,8 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     gdconns = np.zeros((num_gadgets,num_qubits,num_qubits), dtype=np.int8) # Dynamic matrix represnting steiner trees
     gdconns_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Dynamic matrix represnting degrees of node in steiner trees
     last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) # Dynamic matrix representing last edges in tree branches
+    nodes = np.zeros((num_gadgets), dtype=int)
+    steiner_nodes = np.zeros((num_gadgets), dtype=int)
     for i,gadget in enumerate(pp.pauli_gadgets):
         for j in range(num_qubits):
             last_edge[i,j] = -1
@@ -80,22 +82,25 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
         next = next_gadget(general_data, gadget_rand_num, random_sel=random_sel)
-        qubit_map = make_map_from_gdconns(gdconns, gdconns_degrees, next)
-        if qubit_map.number_of_nodes() == 0:
+        num_legs = 0
+        for j in range(num_qubits):
+            if gadget_data[j,next] != 'I':
+                num_legs += 1
+        if num_legs == 0:
             print('ERROR: qubit map has no nodes')
             input()
         
         # Loop going through qubits in gadget, removing them one by one
-        while qubit_map.number_of_nodes() > 1:
+        while num_legs > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
-            edge, gates = next_edge_to_remove(qubit_map, next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
+            edge, gates = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
             removed_gadgets_num += rgadgets
             debug and print('-------Next edge to remove:', edge, 'gates:', gates)
             debug and print_sorted_gd(gadget_data, order=print_order)
             debug and input()
             if gadget_data[edge[0], next] == 'I':
-                qubit_map.remove_node(edge[0])
+                num_legs -= 1
 
     # do clifford synthesis for the second part
     qc_prop_r = list(reversed(qc_prop))
@@ -170,7 +175,7 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     perm_gadgets.append(gadget_index)
     gadget_data[qubit,gadget_index] = 'I'
 
-def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations, removed_gadgets_num, random_sel=False):
+def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_gadgets_num, random_sel=False):
     """Decide what edge to remove next and what gates to apply"""
     # This version primarily chooses gates which minimizes overall effect to the length of chains. 
     # If there are many options having the same score, it secondarily tries to remove/avoid identity gates from the middle of chains.
@@ -179,13 +184,14 @@ def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations
 
     # find different option to remove qubit (edge)
     edge_options = []
-    for v in qubit_map.nodes():
-        if qubit_map.degree[v] == 1:
-            edge_options.append(list(qubit_map.edges(v))[0])
-    if len(edge_options) == 0: # current map is cycle (all nodes degrees>1), add edges with degree 2 to edge_options
-        for v in qubit_map.nodes():
-            if qubit_map.degree[v] == 2:
-                edge_options.append(list(qubit_map.edges(v))[0])
+    for q in range(num_qubits):
+        if gdconns_degrees[gadget_index, q] == 1:
+            edge_options.append((q,last_edge[gadget_index,q]))
+#    if len(edge_options) == 0: # current map is cycle (all nodes degrees>1), add edges with degree 2 to edge_options
+#        print('WARNING: qubit map is cycle, adding edges with degree 2 to options')
+#        for v in qubit_map.nodes():
+#            if qubit_map.degree[v] == 2:
+#                edge_options.append(list(qubit_map.edges(v))[0])
 
     # find possible gates for each edge option
     edge_gates = []
@@ -299,12 +305,12 @@ def next_gadget(general_data, gadget_rand_num, random_sel=False):
     for i in range(num_gadgets):
         if removed_gadgets[i]:
             continue
-        s_nodes, nodes, min_from_edge = steiner_nodes(gadget_data, gdconns_degrees, i)
-        order.append((i, s_nodes, nodes+s_nodes, gadget_rand_num[i], min_from_edge))
+        s_nodes, nodes = steiner_nodes(gadget_data, gdconns_degrees, i)
+        order.append((i, s_nodes, nodes+s_nodes, gadget_rand_num[i]))
     if random_sel:
-        order.sort(key=lambda x: (x[2], x[1], -x[4], x[3]))
+        order.sort(key=lambda x: (x[2], x[1], x[3]))
     else:
-        order.sort(key=lambda x: (x[2], x[1], -x[4], x[0]))
+        order.sort(key=lambda x: (x[2], x[1], x[0]))
     return order[0][0]
 
 
@@ -535,34 +541,17 @@ def map_gadget(gadget_data,topo, gadget_index):
     return nx.Graph(steiner_stree)
 
 
-def make_map_from_gdconns(gdconns, gdconns_degrees, gadget_index):
-    """ Make steiner tree from gdconns data."""
-    num_qubits = gdconns.shape[1]
-    qubit_map = nx.Graph()
-    for i in range(num_qubits):
-        if gdconns_degrees[gadget_index,i] > 0:
-            qubit_map.add_node(i)
-    for i in range(num_qubits-1):
-        for j in range(i+1,num_qubits):
-            if gdconns[gadget_index,i,j] == 1:
-                qubit_map.add_edge(i,j)
-    return qubit_map
-
-
 def steiner_nodes(gadget_data, gdconns_degrees, gadget_index):
     """ Defines number of steiner nodes and regular nodes of steiner tree (gdconns data)"""
     num_qubits = gadget_data.shape[0]
     nodes = 0
     steiner_nodes = 0
-    min_from_edge = num_qubits
     for i in range(num_qubits):
         if gadget_data[i, gadget_index] != 'I':
             nodes += 1
-            from_edge = min(i,num_qubits-i-1)
-            min_from_edge = min(min_from_edge, from_edge)
         elif gdconns_degrees[gadget_index, i] > 0:
             steiner_nodes += 1
-    return steiner_nodes, nodes, min_from_edge
+    return steiner_nodes, nodes
 
 
 def apply_vdg(p):
