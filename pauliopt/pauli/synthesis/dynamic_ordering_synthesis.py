@@ -242,18 +242,13 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
                 if intersection > 0:
                     score_change = 1
 
-            # Pair is touches last qubit of a branch. Try not to extneded branch
-            elif qubit0_degree == 1 and qubit1_degree == 0:
+            # Pair touches last qubit of a branch. Try not to extend branch
+            elif (qubit0_degree == 1 and qubit1_degree == 0) or (qubit0_degree == 0 and qubit1_degree == 1):
                 intersection = gates0 & gate_combinations[(legs,False,False)]
                 if intersection > 0:
                     score_change = -1
 
-            # Same situation but reversed
-            elif qubit0_degree == 0 and qubit1_degree == 1:
-                intersection = gates0 & gate_combinations[(legs,False, False)]
-                if intersection > 0:
-                    score_change = -1
-
+            # Pair is last pair in a brach in this gadget. Try turn one qubit to I
             elif qubit0_degree == 1 and qubit1_degree == 1:
                 intersection = gates0 & (gate_combinations[(legs,False,True)] | gate_combinations[(legs,True,False)])
                 if intersection > 0:
@@ -395,8 +390,7 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
     removed_connections = 0
-    for q1 in range(num_qubits): # Loop trough all 
-        # If qubit is not in the end of branch/chain
+    for q1 in range(num_qubits): # Loop trough all edge pairs of of gadget
         if (q1!=qubit1 and q1!=qubit2) or (gdconns_degrees[gadget_index,q1] != 1):
             continue
         q2 = last_edge[gadget_index,q1]
@@ -467,7 +461,7 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
                 add_connection(general_data, gadget_index, qubit1, qubit2)
                 last_edge[gadget_index,qubit2] = qubit1
 
-    # If one of the qubits of the edge is in the midddle of chain
+    # If one of the qubits is in the midddle of chain
     # and other qubit is not in any branch and turns from I to pauli: new branch
     if gdconns_degrees[gadget_index,qubit1] == 0 and gdconns_degrees[gadget_index,qubit2] > 1 and pauli1 != 'I': # New branch
         add_connection(general_data, gadget_index, qubit1, qubit2)
