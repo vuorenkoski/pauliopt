@@ -41,6 +41,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     for i in range(num_gadgets):
         gadget_rand_num.append(random.randrange(num_gadgets * 100))
 
+    print('new start')
     # Create datastructures
     gadget_data = np.zeros((num_qubits,num_gadgets), dtype=('U1')) # Dynamic matrix representing paulis
     gdconns = np.zeros((num_gadgets,num_qubits,num_qubits), dtype=np.int8) # Dynamic matrix represnting steiner trees
@@ -60,8 +61,13 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
             else:
                 raise ValueError(f'Unknown Pauli {gadget_data[j,i]} in gadget {i}')
         gadget_angles.append(gadget.angle)
-        qubit_map = map_gadget(gadget_data, topo, i)
-        update_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, i)
+        qubit_mapo = map_gadget(gadget_data, topo, i)
+        qubit_map = map_gadget2(gadget_data, topo, i)
+        print(gadget_data[:,i])
+        print('steiner tree',qubit_mapo.nodes())
+        print(qubit_map.nodes())
+#            input()
+        create_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, i)
     gate_combinations = {} # Immutable dictionary of possible gates for each pair of paulis and targets
     for p1 in ['X', 'Y', 'Z', 'I']:
         for p2 in ['X', 'Y', 'Z', 'I']:
@@ -80,22 +86,36 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
         next = next_gadget(general_data, gadget_rand_num, random_sel=random_sel)
+        debug and print('----------- next gadget',next)
+        # When selecting new gadget to remove, reconstruct qubit map
         qubit_map = make_map_from_gdconns(gdconns, gdconns_degrees, next)
+        print(qubit_map.nodes())
+        print(qubit_map.edges())
+        print(gadget_data[:,next])
+#        qubit_map = map_gadget2(gadget_data, topo, next)
+#        create_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, next)
+        debug and print('gdcons before removing edges:', gdconns[next])
+        debug and print('gdcons_degrees before removing edges:', gadget_data[:,next])
         if qubit_map.number_of_nodes() == 0:
             print('ERROR: qubit map has no nodes')
             input()
-        
         # Loop going through qubits in gadget, removing them one by one
         while qubit_map.number_of_nodes() > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates = next_edge_to_remove(qubit_map, next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
+            debug and print('-------------gd before removeing edge', edge, 'gates:', gates)
+            debug and print_sorted_gd(gadget_data, order=print_order)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
             removed_gadgets_num += rgadgets
-            debug and print('-------Next edge to remove:', edge, 'gates:', gates)
+            debug and print('-------gd after:', edge, 'gates:', gates)
             debug and print_sorted_gd(gadget_data, order=print_order)
+            debug and print('gdcons after:', gdconns[next])
+            debug and print('gdconns_degrees after:', gdconns_degrees[next])
             debug and input()
             if gadget_data[edge[0], next] == 'I':
                 qubit_map.remove_node(edge[0])
+            if gadget_data[edge[1], next] == 'I':
+                qubit_map.remove_node(edge[1])
 
     # do clifford synthesis for the second part
     qc_prop_r = list(reversed(qc_prop))
@@ -115,7 +135,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
 
     return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx}
 
-def update_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, gadget_index):
+def create_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, gadget_index):
     """Update connection datastructure based on qubit_map provided by networkx steinertree algorithm."""
     num_qubits = gdconns.shape[1]
     for j in range(num_qubits):
@@ -182,10 +202,17 @@ def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations
     for v in qubit_map.nodes():
         if qubit_map.degree[v] == 1:
             edge_options.append(list(qubit_map.edges(v))[0])
-    if len(edge_options) == 0: # current map is cycle (all nodes degrees>1), add edges with degree 2 to edge_options
-        for v in qubit_map.nodes():
-            if qubit_map.degree[v] == 2:
-                edge_options.append(list(qubit_map.edges(v))[0])
+    if len(edge_options) == 0:     # current map is cycle (all nodes degrees>1), add edges with degree 2 to edge_options
+        nodes = set(qubit_map.nodes()) - set(nx.articulation_points(qubit_map))
+#        print(nodes)
+        for node in nodes:
+#            print('Node:', node, 'pauli:', gadget_data[node,gadget_index])
+            if gadget_data[node,gadget_index] != 'I': 
+                for e in qubit_map.edges(node):
+                    edge_options.append(e)
+#    print('graph nodes:', qubit_map.nodes())
+#    print('gdcons:', gdconns[gadget_index])
+#    print('starting edge removal options:', edge_options)
 
     # find possible gates for each edge option
     edge_gates = []
@@ -198,6 +225,9 @@ def next_edge_to_remove(qubit_map, gadget_index, general_data, gate_combinations
             edge_gates.append(options)
 
     if num_gadgets - removed_gadgets_num == 1: # Only one gadget left, choose any
+#        print('Only one gadget left, choosing first option')
+#        print('edge options:', edge_options)
+#        print('edge gates:', edge_gates)
         return edge_options[0], get_gates(edge_gates[0])[0]
 
     score = np.zeros((len(edge_options),36), dtype=int)
@@ -359,6 +389,10 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         pauli1, pauli2 = gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index]
         if pauli1 == 'I' and pauli2 == 'I':
             continue
+#        print('updateing gadget:', gadget_index)
+#        print('gdcons before:', gdconns[gadget_index])
+#        print('gdcons_degrees before:', gdconns_degrees[gadget_index])
+#        print('last edges before:', last_edge[gadget_index])
         phase = 1
         # Apply possible single qubit gates
         if gate1 is not None:
@@ -373,17 +407,21 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = pauli1, pauli2
         gadget_angles[gadget_index] *= phase
 
-        
+#        print('gadget', gadget_index, qubit1, qubit2, 'after gates:', pauli1, pauli2, 'phase:', phase)
         # Update gdconns and gdconns_degrees
         gadget_removed, rconnections = update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2)
         removed_connections += rconnections
-        if gadget_removed:
+        npaulis = 0
+        for i in range(num_qubits):
+            if gadget_data[i,gadget_index] != 'I':
+                npaulis += 1
+        if npaulis == 1:
             if pauli1 == 'I':
                 remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit2)
             else:
                 remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit1)
             removed_gadgets_num += 1
-            gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = 'I', 'I'
+#            print('Gadget', gadget_index, 'removed after applying CNOT to qubits', qubit1, qubit2)
 #        check_cdconns_integrity(gdconns, gdconns_degrees, gadget_data, last_edge)
     return removed_gadgets_num
 
@@ -394,6 +432,61 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
     removed_connections = 0
+
+#    circle = True
+#    for degree in gdconns_degrees[gadget_index]:
+#        if degree == 1:
+#            circle = False
+#            break
+
+#    print(gdconns_degrees[gadget_index])
+#    print(gdconns[gadget_index])
+#    print('Circle:', circle)
+#    if circle: # Gadget is cycle, break it from qubit1
+#        if circle and gdconns_degrees[gadget_index,qubit1] == 2 and gdconns_degrees[gadget_index,qubit2] > 1:
+#            print('Circle break at qubits', qubit1, qubit2, pauli1, pauli2)
+#            if pauli1 == 'I': 
+#                remove_connection(general_data, gadget_index, qubit1, qubit2)
+#                for qn in range(num_qubits):
+#                    if gdconns[gadget_index,qn,qubit1] == 1:
+#                       I_neighbour = qn
+#                remove_connection(general_data, gadget_index, qubit1, I_neighbour)
+#                removed_connections += 2
+#                for qn in range(num_qubits):
+#                    if gdconns[gadget_index,qn,qubit2] == 1:
+#                        last_edge[gadget_index,qubit2] = qn
+#                    if gdconns[gadget_index,qn,I_neighbour] == 1:
+#                        last_edge[gadget_index,I_neighbour] = qn
+#                last_edge[gadget_index,qubit1] = -1
+#                print('I neighbour:', I_neighbour)
+#                print('Last edges:', last_edge[gadget_index])
+#                print('Degrees:', gdconns_degrees[gadget_index])
+#                print(gdconns[gadget_index])
+#                gadget_removed = follow_chain_until_not_I(general_data, gadget_index, I_neighbour, gadget_data[I_neighbour,gadget_index])
+#                return gadget_removed, removed_connections
+#            if pauli2 == 'I': 
+#                remove_connection(general_data, gadget_index, qubit1, qubit2)
+#                removed_connections += 1
+#                I_neighbours =[]
+#                for qn in range(num_qubits):
+#                    if gdconns[gadget_index,qn,qubit2] == 1:
+#                        I_neighbours.append(qn)
+#                        remove_connection(general_data, gadget_index, qubit2, qn)
+#                        removed_connections += 1
+#                for qn in range(num_qubits):
+#                    if gdconns[gadget_index,qn,qubit1] == 1:
+#                        last_edge[gadget_index,qubit1] = qn
+#                    for I_neighbour in I_neighbours:
+#                        if gdconns[gadget_index,qn,I_neighbour] == 1:
+#                            last_edge[gadget_index,I_neighbour] = qn
+#                last_edge[gadget_index,qubit2] = -1
+#                print('I neighbour:', I_neighbour)
+#                print('Last edges:', last_edge[gadget_index])
+#                print('Degrees:', gdconns_degrees[gadget_index])
+#                print(gdconns[gadget_index])
+#                gadget_removed = follow_chain_until_not_I(general_data, gadget_index, I_neighbour, gadget_data[I_neighbour,gadget_index])
+#                return gadget_removed, removed_connections
+
     for q1 in range(num_qubits):
         # If qubit is not in the end of branch/chain
         if (q1!=qubit1 or q1!=qubit2) and gdconns_degrees[gadget_index,q1] != 1:
@@ -477,7 +570,7 @@ def follow_chain_until_not_I(general_data, gadget_index, qubit, pauli):
     num_qubits = gdconns.shape[1]
     if gdconns_degrees[gadget_index,qubit] > 1:
         return False
-    
+ #   print('Following chain in gadget', gadget_index, 'from qubit', qubit, 'pauli', pauli)
     qubit2 = None
     j = 0
     for i in range(num_qubits):
@@ -523,6 +616,17 @@ def remove_connection(general_data, gadget_index, qubit1, qubit2):
     gdconns_degrees[gadget_index,qubit1] -= 1
     gdconns_degrees[gadget_index,qubit2] -= 1
 
+def remove_node(general_data, gadget_index, qubit1):
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    num_qubits = gdconns.shape[1]
+    for qn in range(num_qubits):
+        if gdconns[gadget_index,qubit1,qn] == 1:
+            remove_connection(general_data, gadget_index, qubit1, qn)
+        if gdconns_degrees[gadget_index,qn] == 1:
+            for q2 in range(num_qubits):
+                if gdconns[gadget_index,qn,q2] == 1:
+                    last_edge[gadget_index,qn] = q2
+
 
 def map_gadget(gadget_data,topo, gadget_index):
     """ Uses NetworkX Steinertree algorithm to make steinertree from gadget."""
@@ -531,9 +635,35 @@ def map_gadget(gadget_data,topo, gadget_index):
     for i in range(num_qubits):
         if gadget_data[i,gadget_index] != 'I':
             nodes.append(i)
-    steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
-    return nx.Graph(steiner_stree)
+    steiner_tree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
+    return nx.Graph(steiner_tree)
 
+def map_gadget2(gadget_data,topo, gadget_index):
+    # without using steinertree algorithm
+    num_qubits, num_gadgets = gadget_data.shape
+    g = topo.to_nx.copy()
+#    print('all nodes:', g.edges())
+#    print('initial articulation points:', set(nx.articulation_points(g)))
+    found = True
+#    print('Initial graph:', g)
+#    print('Gadget data:', gadget_data[:,gadget_index])
+    while found:
+        found = False
+        nodes = set(g.nodes()) - set(nx.articulation_points(g))
+#        print('non-Articulation points:', nodes)
+#        print('articulation points:', set(nx.articulation_points(g)))
+
+#        if len(list(nodes)) == 0:
+#            print('No articulation points found')
+#            input()
+        for node in nodes:
+            if gadget_data[node,gadget_index] == 'I':
+                g.remove_node(node)
+#                print('Removed node:', node)
+                found = True
+                break
+#    print(g)
+    return g
 
 def make_map_from_gdconns(gdconns, gdconns_degrees, gadget_index):
     """ Make steiner tree from gdconns data."""
