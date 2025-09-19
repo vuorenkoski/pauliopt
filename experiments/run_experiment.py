@@ -234,7 +234,7 @@ if __name__ == "__main__":
     verify = False
     methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
     mapping_method = I_index_mapping
-    mapping_method = zx_index_mapping
+#    mapping_method = zx_index_mapping
 #    mapping_method = mapping_by_balance
 #    mapping_method = pauli_forest_mapping
 #    mapping_method = I_to_edge
@@ -242,46 +242,20 @@ if __name__ == "__main__":
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20))
 #    steps = list(range(200, 1000, 50))
 #    steps = list(range(20, 220, 20))
-<<<<<<< Updated upstream
+#    steps = [320]
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
 #    backend = {'name': 'grid', 'qubits': 9}
     backend = {'name': 'line', 'qubits': 6}
-#    backend = {'name': 'complete', 'qubits': 6}
     logical_qubits = 6
-#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps)
-#    input()
-=======
-#    steps = [320]
-#    backend = {'name': 'quito', 'qubits': 5}
-#    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 9}
-#    backend = {'name': 'line', 'qubits': 6}
-    logical_qubits = 9
     max_legs = None
     random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
     input()
->>>>>>> Stashed changes
 
     seed = 42
     gadgets = 40
     backend = {'name': 'line', 'qubits': 6}
-<<<<<<< Updated upstream
-    synth_method=pauli_polynomial_steiner_gray_clifford
-#    synth_method=pauli_polynomial_dynamic_ordering
-#    all_mappings(pp, backend, synth_method=synth_method)
-#    input()
-
-    gadgets = 10
-    seed = 43
     logical_qubits = 6
-    physical_qubits = 6
-    topology = 'line'
-
-    print('\n\nstart-------------------------------------------------')
-=======
-    logical_qubits = 6
->>>>>>> Stashed changes
     random.seed(seed)
     pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0)
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
