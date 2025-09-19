@@ -4,8 +4,10 @@ from pauliopt.pauli.pauli_gadget import PauliGadget
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from pauliopt.gates import CX
 from pauliopt.pauli.pauli_gadget import PPhase
+from pauliopt.pauli.synthesis.pp_mapping import qubit_correlations
 from pauliopt.utils import pi
 from pauliopt.topologies import Topology
+import networkx as nx
 
 def permute_with_mapping(mapping, pp, num_physical_qubits):
     """Permute the PauliPolynomial with the mapping"""
@@ -128,8 +130,7 @@ def print_pp(pp, order=None):
 
     if order is None:
         order = [i for i in range(num_gadgets)]
-    else:
-        order = [order[i] for i in range(len(order))]
+
     print(' ', end=' ')
     for i in order:
         print(int(i / 10), end=' ')
@@ -165,6 +166,7 @@ def aggregate_data(df, method1, method2):
     df3['sg-sgm%'] = np.round(((df3['sg+mapping'] / df3['sg']) - 1)*100,1)
     df3['sg-do%'] = np.round(((df3['do'] / df3['sg']) - 1)*100,1)
     df3['do-dom%'] = np.round(((df3['do+mapping'] / df3['do']) - 1)*100,1)
+    df3['sg-dom%'] = np.round(((df3['do+mapping'] / df3['sg']) - 1)*100,1)
     df3['sg-do time%'] = np.round(((df3['do (ms)'] / df3['sg (ms)']) - 1)*100,1)
     df3 = df3.rename(columns={'n_gadgets': 'gadgets'})
     df3 = df3.set_index('gadgets')
@@ -222,3 +224,74 @@ def get_topo(topo_name, num_qubits=9):
             n_rows, n_cols = find_square_dimensions(num_qubits)
             return Topology.grid(n_rows, n_cols)
     return ibm_backend(topo_name)
+
+def steiner_tree_analysis(pp, topo):
+    steiner_nodes = 0
+    steiner_nodesx = 0
+    steiner_nodesz = 0
+    broken_chains = 0
+    doubles = 0
+    for gadget in pp.pauli_gadgets:
+        nodes = []
+        znodes = []
+        xnodes = []
+        for j in range(len(gadget)):
+            if gadget[j] != I:
+                nodes.append(j)
+            if gadget[j] == X or gadget[j] == Y:
+                xnodes.append(j)
+            if gadget[j] == Z or gadget[j] == Y:
+                znodes.append(j)
+        steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
+        I_nodes = len(steiner_stree.nodes) - len(nodes)
+        steiner_nodes += I_nodes
+        if len(xnodes)>0:
+            steiner_streex = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, xnodes)
+            Ix_nodes = len(steiner_streex.nodes) - len(xnodes)
+            steiner_nodesx += Ix_nodes
+        if len(znodes)>0:
+            steiner_streez = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, znodes)
+            Iz_nodes = len(steiner_streez.nodes) - len(znodes)
+            steiner_nodesz += Iz_nodes
+        if I_nodes>0:
+            broken_chains += 1
+        if I_nodes == 0 and len(nodes) == 2:
+            doubles += 1
+    return steiner_nodes, broken_chains, doubles, steiner_nodesx, steiner_nodesz
+
+def I_index(pp, topo):
+    num_qubits = pp.num_qubits
+    ind = 0
+    for q1 in range(num_qubits-1):
+        for q2 in range(q1+1,num_qubits):
+            if topo.dist(q1,q2) == 1:
+                for gadget in pp.pauli_gadgets:
+                    if (gadget.paulis[q1] == I) != (gadget.paulis[q2] == I):
+                        ind += 1
+    return ind
+
+def qubit_correlation_sum(pp, topo):
+    correlations = qubit_correlations(pp)
+    c_sum = 0
+    for i in range(pp.num_qubits-1):
+        for j in range(i+1, pp.num_qubits):
+            if topo.dist(i,j) == 1:
+                c_sum += correlations[i,j]
+    return c_sum
+
+def order_gadgets(pp, topo):
+    order = []
+    for i, gadget in enumerate(pp.pauli_gadgets):
+        nodes = []
+        min_from_edge = topo.num_qubits 
+        for j in range(len(gadget)):
+            if gadget[j] != I:
+                nodes.append(j)
+                from_edge = min(j, topo.num_qubits - j - 1)
+                min_from_edge = min(min_from_edge, from_edge)
+        steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
+        I_nodes = len(steiner_stree.nodes) - len(nodes)
+        order.append((i, len(steiner_stree.nodes), I_nodes, min_from_edge))
+    order.sort(key=lambda x: (x[1], x[2], -x[3]))
+    print(order)
+    return [i[0] for i in order]

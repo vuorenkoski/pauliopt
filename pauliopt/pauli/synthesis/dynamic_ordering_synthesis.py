@@ -61,6 +61,8 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
                 raise ValueError(f'Unknown Pauli {gadget_data[j,i]} in gadget {i}')
         gadget_angles.append(gadget.angle)
         qubit_map = map_gadget(gadget_data, topo, i)
+        nodes[i] = qubit_map.number_of_nodes()
+        steiner_nodes[i] = nodes[i] - sum(1 for p in gadget_data[:,i] if p != 'I')
         update_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge, i)
     gate_combinations = {} # Immutable dictionary of possible gates for each pair of paulis and targets
     for p1 in ['X', 'Y', 'Z', 'I']:
@@ -69,7 +71,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
                 for target1 in [False, True]: # Is target to have I or not after gates in qubit1
                     options = possible_gates((p1, p2), target0, target1)
                     gate_combinations[(p1 + p2, target0, target1)] = options
-    general_data = (gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge)
+    general_data = (gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes)
     circ_data = (qc_out, qc_prop)
 
     debug and print_sorted_gd(gadget_data, order=print_order)
@@ -80,16 +82,12 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
         next = next_gadget(general_data, gadget_rand_num, random_sel=random_sel)
-        num_legs = 0
-        for j in range(num_qubits):
-            if gadget_data[j,next] != 'I':
-                num_legs += 1
-        if num_legs == 0:
+        if nodes[next] == 0:
             print('ERROR: qubit map has no nodes')
             input()
         
         # Loop going through qubits in gadget, removing them one by one
-        while num_legs > 1:
+        while nodes[next] > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates = next_edge_to_remove2(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
 #            print(gates)
@@ -98,8 +96,8 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
             debug and print('-------Next edge to remove:', edge, 'gates:', gates, 'gadget', next)
             debug and print_sorted_gd(gadget_data, order=print_order)
             debug and input()
-            if gadget_data[edge[0], next] == 'I':
-                num_legs -= 1
+#            if gadget_data[edge[0], next] == 'I':
+#                num_legs -= 1
 
     # do clifford synthesis for the second part
     qc_prop_r = list(reversed(qc_prop))
@@ -142,7 +140,7 @@ def update_gdconns_from_qubit_map(qubit_map, gdconns, gdconns_degrees, last_edge
 
 def check_for_singles(general_data, circ_data, perm_gadgets):
     """ check if there are gadgets having only single leg and remove them if so."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     num_qubits, num_gadgets = gadget_data.shape
     removed_gadgets_num = 0
 
@@ -161,7 +159,7 @@ def check_for_singles(general_data, circ_data, perm_gadgets):
 
 def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     """ Remove gadget having single leg indicated by gadget_index."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     qc_out, qc_prop = circ_data
     pauli = gadget_data[qubit,gadget_index]
     removed_gadgets[gadget_index] = 1
@@ -176,6 +174,7 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
         qc_out.vdg(qubit)
     perm_gadgets.append(gadget_index)
     gadget_data[qubit,gadget_index] = 'I'
+    nodes[gadget_index] = 0
 
 def next_edge_to_remove2(gadget_index, general_data, gate_combinations, removed_gadgets_num, random_sel=False):
     """Decide what edge to remove next and what gates to apply"""
@@ -277,7 +276,7 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
     """Decide what edge to remove next and what gates to apply"""
     # This version primarily chooses gates which minimizes overall effect to the length of chains. 
     # If there are many options having the same score, it secondarily tries to remove/avoid identity gates from the middle of chains.
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     num_qubits, num_gadgets = gadget_data.shape
 
     # find different option to remove qubit (edge)
@@ -387,24 +386,23 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
 
 def next_gadget(general_data, gadget_rand_num, random_sel=False):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     num_qubits, num_gadgets = gadget_data.shape
     order = []
     for i in range(num_gadgets):
         if removed_gadgets[i]:
             continue
-        s_nodes, nodes = steiner_nodes(gadget_data, gdconns_degrees, i)
-        order.append((i, s_nodes, nodes+s_nodes, gadget_rand_num[i]))
+        order.append((i, nodes[i], steiner_nodes[i], gadget_rand_num[i]))
     if random_sel:
-        order.sort(key=lambda x: (x[2], x[1], x[3]))
+        order.sort(key=lambda x: (x[1], x[2], x[3]))
     else:
-        order.sort(key=lambda x: (x[2], x[1], x[0]))
+        order.sort(key=lambda x: (x[1], x[2], x[0]))
     return order[0][0]
 
 
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets):
     """apply single qubit gates and CNOT to all non-removed gates."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     qc_out, qc_prop = circ_data
     num_qubits, num_gadgets = gadget_data.shape
 
@@ -464,9 +462,27 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         # Apply CNOT gate
         pauli1, pauli2, phase_change = apply_cnot(pauli1, pauli2)
         phase *= phase_change
+
+        if gadget_data[qubit1,gadget_index] != 'I' and pauli1 == 'I'and gdconns_degrees[gadget_index,qubit1] > 1:
+            steiner_nodes[gadget_index] += 1
+        if gadget_data[qubit2,gadget_index] != 'I' and pauli2 == 'I'and gdconns_degrees[gadget_index,qubit2] > 1:
+            steiner_nodes[gadget_index] += 1
+        if gadget_data[qubit1,gadget_index] == 'I' and pauli1 != 'I'and gdconns_degrees[gadget_index,qubit1] > 1:
+            steiner_nodes[gadget_index] -= 1
+        if gadget_data[qubit2,gadget_index] == 'I' and pauli2 != 'I'and gdconns_degrees[gadget_index,qubit2] > 1:
+            steiner_nodes[gadget_index] -= 1
+
+        if gadget_data[qubit1,gadget_index] == 'I' and pauli2 != 'I'and gdconns_degrees[gadget_index,qubit1] < 2:
+            nodes[gadget_index] += 1
+        if gadget_data[qubit2,gadget_index] == 'I' and pauli2 != 'I'and gdconns_degrees[gadget_index,qubit2] < 2:
+            nodes[gadget_index] += 1
+        if gadget_data[qubit1,gadget_index] != 'I' and pauli2 == 'I'and gdconns_degrees[gadget_index,qubit1] < 2:
+            nodes[gadget_index] -= 1
+        if gadget_data[qubit2,gadget_index] != 'I' and pauli2 == 'I'and gdconns_degrees[gadget_index,qubit2] < 2:
+            nodes[gadget_index] -= 1
+
         gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = pauli1, pauli2
         gadget_angles[gadget_index] *= phase
-
         
         # Update gdconns and gdconns_degrees
         gadget_removed, rconnections = update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2)
@@ -484,7 +500,7 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
 
 def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
     """ Update gdconns and gdconns_degrees for gadget. Loop through all edge pairs which are in the edge of branch. Check is there changes for those."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
     removed_connections = 0
@@ -572,7 +588,7 @@ def update_gdconns(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
 
 def follow_chain_until_not_I(general_data, gadget_index, qubit, pauli):
     """Recursive functions following chain of I:s until next qubit is not I. Return True if gadget was removed."""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     num_qubits = gdconns.shape[1]
     if gdconns_degrees[gadget_index,qubit] > 1:
         return False
@@ -597,6 +613,8 @@ def follow_chain_until_not_I(general_data, gadget_index, qubit, pauli):
 
     # pauli is I, we must remove connection
     remove_connection(general_data, gadget_index, qubit, qubit2)
+    nodes[gadget_index] -= 1
+    steiner_nodes[gadget_index] -= 1
 
     # If next qubit2 has degree 0 after removing connection, it means that this the only leg left
     if gdconns_degrees[gadget_index,qubit2] == 0:
@@ -607,7 +625,7 @@ def follow_chain_until_not_I(general_data, gadget_index, qubit, pauli):
 
 def add_connection(general_data, gadget_index, qubit1, qubit2):
     """Add connection between two qubits in a gadget"""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     gdconns[gadget_index,qubit1,qubit2] = 1
     gdconns[gadget_index,qubit2,qubit1] = 1
     gdconns_degrees[gadget_index,qubit1] += 1
@@ -616,7 +634,7 @@ def add_connection(general_data, gadget_index, qubit1, qubit2):
 
 def remove_connection(general_data, gadget_index, qubit1, qubit2):
     """Add connection between two qubits in a gadget"""
-    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gdconns, gdconns_degrees, last_edge, nodes, steiner_nodes = general_data
     gdconns[gadget_index,qubit1,qubit2] = 0
     gdconns[gadget_index,qubit2,qubit1] = 0
     gdconns_degrees[gadget_index,qubit1] -= 1

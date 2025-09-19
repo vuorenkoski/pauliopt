@@ -1,22 +1,24 @@
-from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I
+from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I, X, Y, Z
 import numpy as np
 import random
 
+# Similar to I-index mapping: https://ieeexplore.ieee.org/abstract/document/10771974
+# Differences: how mapping is done after initial physical and logical qubit pair. I-index has more straightforward way: what logical qubit woul
+# have most common legs with mapped logical qubit when new logical qubit would be placed as a neighbour of mapped logical qubit.
+
 def I_index_mapping(pp: PauliPolynomial, topo: Topology):
-    """Mapping is based on trying to maximize I and non-I pairs in the PauliPolynomial after mapping.
-    :param pp: PauliPolynomial to map
-    :param topo: Topology to map to
-    :return: Edge weights as a numpy array
-    """
+    # This mapping gives weghts to edges according to the how many paulis have both these legs
+    # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit.
+    # Difference to forest: I-index is the same, but finding optimal mappings after initial is little bit different.
     tm = create_topology_matrix(topo)
-#    weight = attenuation(pp)
-    edges = edges_by_I_index(pp)
-#    mapping = map_graphs_by_chains(edges,tm)
-    mapping = map_graphs_from_center(edges,tm,pp)
+    weights = edges_by_I_index(pp)
+#    print(weights)
+#    mapping = map_graphs_by_chains(weights, tm)
+    mapping = map_graphs_from_center(weights, pp, tm)
     return mapping
 
 def edges_by_I_index(pp: PauliPolynomial):
-    """ Gives edges weight by calculating gadgets having both qubits I or non-I.
+    """ Gives edges weight by calculating gadgets having both qubits non-I.
     :param pp: PauliPolynomial to map
     :param debug: If True, print debug information
     :return: Edge weights as a numpy array
@@ -24,103 +26,392 @@ def edges_by_I_index(pp: PauliPolynomial):
     num_qubits = pp.num_qubits
     edges = np.zeros((num_qubits, num_qubits), dtype=int)
 
-    for q1 in range(num_qubits-1):
-        for q2 in range(q1+1,num_qubits):
+    for q1 in range(num_qubits):
+        for q2 in range(num_qubits):
             I_index = 0
             for i, gadget in enumerate(pp.pauli_gadgets):
                 if (gadget.paulis[q1] != I) and (gadget.paulis[q2] != I):
-                    I_index += 1
+#                if (gadget.paulis[q1] != I) and (gadget.paulis[q2] != I) and (gadget.paulis[q1] == gadget.paulis[q2]):
+                    I_index += 10
+                    if similar_paulis(gadget.paulis[q1], gadget.paulis[q2]):
+#                    if  (gadget.paulis[q1] == gadget.paulis[q2]):
+                        I_index += 0
             edges[q1,q2] = I_index
     return edges
 
-def map_graphs_from_center(edges, tm, pp):
-    """Map logical qubits to physical qubits. First create center of physical qubits, then heaviest center of logical qubits, and map them together.
-    After that map rest of the logical qubits to physical qubits from starting haeviest pair which first qubit is mapped and second is not.
-    :param edges: Edge weights as a numpy array
-    :param tm: Topology as numpy-matrix
-    :return: List of logical qubits mapped to physical qubits
+def zx_index_mapping(pp: PauliPolynomial, topo: Topology):
+    tm = create_topology_matrix(topo)
+    weights = edges_by_zx_index(pp)
+    mapping = map_graphs_from_center(weights, pp, tm)
+    return mapping
+
+
+def edges_by_zx_index(pp: PauliPolynomial):
+    """ Gives edges weight by calculating gadgets having both qubits non-I.
+    :param pp: PauliPolynomial to map
+    :param debug: If True, print debug information
+    :return: Edge weights as a numpy array
     """
-    num_physical_qubits = len(tm)
-    num_logical_qubits = len(edges)
+    num_qubits = pp.num_qubits
+    edges = np.zeros((num_qubits, num_qubits), dtype=int)
+
+    for q1 in range(num_qubits):
+        for q2 in range(num_qubits):
+            index = 0
+            for i, gadget in enumerate(pp.pauli_gadgets):
+                if (gadget.paulis[q1] == X or gadget.paulis[q1] == Y) and (gadget.paulis[q2] == X or gadget.paulis[q2] == Y):
+                    index += 1
+                if (gadget.paulis[q1] == Z or gadget.paulis[q1] == Y) and (gadget.paulis[q2] == Z or gadget.paulis[q2] == Y):
+                    index += 1
+            edges[q1,q2] = index
+    return edges
+
+def similar_paulis(p1,p2):
+    if p1==X and (p2==X or p2==Y):
+        return True
+    if p1==Z and (p2==Z or p2==Y):
+        return True
+    if p1==Y and (p2==X or p2==Z):
+        return True
+    if p1==I and p2==I:
+        return True
+    return False
+
+def convert(pauli):
+    if pauli == I:
+        return 0
+    elif pauli == X:
+        return 1
+    elif pauli == Z:
+        return 2
+    elif pauli == Y:
+        return 3
+    else:
+        raise ValueError(f'Unknown Pauli {pauli}')
+
+def convert_r(pauli):
+    if pauli == 0:
+        return I
+    elif pauli == 1:
+        return X
+    elif pauli == 2:
+        return Z
+    elif pauli == 3:
+        return Y
+    else:
+        raise ValueError(f'Unknown Pauli {pauli}')
+
+def mapping_by_balance(pp, topo):
+    # Tries to find logical qubits which legs have many same paulis. Initially
+    # After that places logical qubits to qubits to neighbour so that this mac pauli gadgets would have
+    # max number of same paulis. So that it would construct YY, XX, ZZ, II pairs.
+    tm = create_topology_matrix(topo)
+    mapped_logical_qubits = []
+    mapped_physical_qubits = []
+    mapping = [-1 for _ in range(pp.num_qubits)]
+
+    # find most imbalance qubit and map it to edge
+    mask = [True for _ in pp.pauli_gadgets]
+    max_imbalance_qubit, _ = find_max_imbalance_qubit(pp, mask, mapped_logical_qubits)
+
+    pq = 0
+#    pq = center_physical_qubit(tm)  # Map to center of topology
+    max_imbalance_qubit = find_lightest_logical_qubit(pp)
+    mapping[max_imbalance_qubit] = pq  # Map this qubit to the edge of topology
+    mapped_logical_qubits.append(max_imbalance_qubit)
+    mapped_physical_qubits.append(pq)
+
+    for qubit in range(1, pp.num_qubits):
+        max_imbalance = None
+        max_pq, max_lq = -1, -1
+        for pq in range(topo.num_qubits):
+            if pq in mapped_physical_qubits:
+                continue
+            for lq in mapped_logical_qubits:
+                if tm[pq, mapping[lq]] == 1:
+                    pauli = find_max_pauli(pp, lq)
+                    mask = [g[lq]==pauli for g in pp.pauli_gadgets]
+                    qubit, imbalance = find_max_imbalance_qubit(pp, mask, mapped_logical_qubits)
+                    if better_imbalance(max_imbalance, imbalance):
+                        max_imbalance = imbalance
+                        max_pq = pq
+                        max_lq = qubit
+
+        mapping[max_lq] = max_pq
+        mapped_logical_qubits.append(max_lq)
+        mapped_physical_qubits.append(max_pq)
+    return mapping
+
+def find_max_pauli(pp,previous):
+    balance = np.zeros(4, dtype=int)  # I, X, Z, Y
+    for gadget in pp.pauli_gadgets:
+        balance[convert(gadget[previous])] += 1
+    max_pauli = None
+    max_value = -1
+    for i in range(4):
+        if balance[i] > max_value:
+            max_value = balance[i]
+            max_pauli = convert_r(i)
+    return max_pauli
+
+def find_max_imbalance_qubit(pp, mask, mapped_logical_qubits):
+    # find qubit that has most least number of one type of legs in gadgets masked by mask. 
+    max_imbalance = None
+    max_imbalance_qubit = -1
+    for lq in range(pp.num_qubits):
+        if lq in mapped_logical_qubits:
+            continue
+        balance = np.zeros(4, dtype=int)  # I, X, Z, Y
+        balance[0] = 999 # we do not want count I:s
+        for g in range(len(pp.pauli_gadgets)):
+            if not mask[g]:
+                continue
+            balance[convert(pp.pauli_gadgets[g][lq])] += 1
+        balance.sort()
+        if max_imbalance is None:
+            max_imbalance = balance
+            max_imbalance_qubit = lq
+            continue
+        better = False
+        for i in range(4):
+            if balance[i] < max_imbalance[i]:
+                better = True
+                break
+            elif balance[i] > max_imbalance[i]:
+                break
+        if better:
+            max_imbalance_qubit = lq
+            max_imbalance = balance
+    return max_imbalance_qubit, max_imbalance
+
+def better_imbalance(imbalance, new_imbalance):
+    if imbalance is None:
+        return True
+    better = False
+    for i in range(4):
+        if new_imbalance[i] < imbalance[i]:
+            better = True
+            break
+        elif new_imbalance[i] > imbalance[i]:
+            break
+    return better
+
+def I_to_edge(pp, topo):
+    tm = create_topology_matrix(topo)
+    weights = []
+    for i in range(topo.num_qubits):
+        ind = 0
+        for gadget in pp.pauli_gadgets:
+            if gadget[i] == I:
+                ind +=1
+        weights.append((i,ind))
+    weights.sort(key=lambda x: x[1], reverse=True)
+    mapping = []
+    mapping.append(weights[0][0])
+    mapping.append(weights[2][0])
+    mapping.append(weights[4][0])
+    mapping.append(weights[6][0])
+    mapping.append(weights[8][0])
+    mapping.append(weights[7][0])
+    mapping.append(weights[5][0])
+    mapping.append(weights[3][0])
+    mapping.append(weights[1][0])
+#    mapping = [x[0] for x in weights]
+    return mapping
+
+
+def pauli_forest_mapping(pp, topo):
+    # https://ieeexplore.ieee.org/abstract/document/10771974
+    correlations = qubit_correlations(pp)
+    tm = create_topology_matrix(topo)
+    mapping = pf_mapping(correlations, pp, tm)
+    return mapping
+
+def pf_mapping(correlations, pp, tm):
+    # https://ieeexplore.ieee.org/abstract/document/10771974
+    apsp = floydWarshall(tm)
+    num_logical_qubits = len(correlations)
+    mapped_logical_qubits = []
+    mapped_physical_qubits = []
+    mapping = [-1 for _ in range(num_logical_qubits)]
+
+    # Search most heavily connected qubit (has most non-I legs)
+    max_conn = 0
+    for i in range(pp.num_qubits):
+        conn = 0
+        for gadget in pp.pauli_gadgets:
+            if gadget[i] != I:
+                conn += 1
+        if conn > max_conn:
+            max_conn = conn
+            heaviest_logical_qubit = i
+
+    # Map this qubit to the center of graph
+    center = center_physical_qubit(tm)
+    mapped_logical_qubits.append(heaviest_logical_qubit)
+    mapped_physical_qubits.append(center)
+    mapping[heaviest_logical_qubit] = center
+
+    while len(mapped_logical_qubits) < num_logical_qubits:
+        # Find logical qubit most related to mapped logical qubits
+        max_relation = -1
+        next_logical_qubit = -1
+        for lq in range(num_logical_qubits):
+            if lq in mapped_logical_qubits:
+                continue
+            rel = 0
+            for mlq in mapped_logical_qubits:
+                rel += correlations[lq, mlq]
+            if max_relation == -1 or rel > max_relation:
+                max_relation = rel
+                next_logical_qubit = lq
+
+        # find physical qubit that has closest distance to some qubit in gadgets having this leg
+        min_distance = -1
+        next_physical_qubit = -1
+        for pq in range(len(tm)):
+            if pq in mapped_physical_qubits:
+                continue
+            dist = 0
+            for gadget in pp.pauli_gadgets:
+                if gadget[next_logical_qubit] != I:
+                    min_gadget_dist = -1
+                    for i in range(num_logical_qubits):
+                        if i in mapped_logical_qubits:
+                            if min_gadget_dist == -1 or apsp[pq,mapping[i]] < min_gadget_dist:
+                                min_gadget_dist = apsp[pq,mapping[i]]
+                    dist += min_gadget_dist
+            if min_distance == -1 or dist < min_distance:
+                min_distance = dist
+                next_physical_qubit = pq
+
+        mapped_logical_qubits.append(next_logical_qubit)
+        mapped_physical_qubits.append(next_physical_qubit)
+        mapping[next_logical_qubit] = next_physical_qubit
+    return mapping
+
+def find_heaviest_logical_qubit(pp):
+    max_conn = 0
+    heaviest_logical_qubit = -1
+    for i in range(pp.num_qubits):
+        conn = 0
+        for gadget in pp.pauli_gadgets:
+            if gadget[i] != I:
+                conn += 1
+#        print('Logical qubit', i, 'has paulis', conn)
+        if conn > max_conn:
+            max_conn = conn
+            heaviest_logical_qubit = i
+    return heaviest_logical_qubit
+
+def find_lightest_logical_qubit(pp):
+    max_I = 0
+    lightest_logical_qubit = -1
+    for i in range(pp.num_qubits):
+        I_count = 0
+        for gadget in pp.pauli_gadgets:
+            if gadget[i] == I:
+                I_count += 1
+        if I_count > max_I:
+            max_I = I_count
+            lightest_logical_qubit = i
+            lightest_logical_qubit = i
+    return lightest_logical_qubit
+
+def map_graphs_from_center(correlations, pp, tm):
+    num_logical_qubits = len(correlations)
+    mapped_logical_qubits = []
+    mapped_physical_qubits = []
+    mapping = [-1 for _ in range(num_logical_qubits)]
+    mapping_reverse = [-1 for _ in range(pp.num_qubits)]
+
+    # Search most heavily connected qubit (has most non-I legs)
+    heaviest_logical_qubit = find_heaviest_logical_qubit(pp)
+
+    # Map this qubit to the center of graph
+    center = center_physical_qubit(tm)
+    mapped_logical_qubits.append(heaviest_logical_qubit)
+    mapped_physical_qubits.append(center)
+    mapping[heaviest_logical_qubit] = center
+    mapping_reverse[center] = heaviest_logical_qubit
+
+    while len(mapped_logical_qubits) < num_logical_qubits:
+        # find possible next physical qubits
+        npq = []
+        for mpq in mapped_physical_qubits:
+            for nmpq in range(len(tm)):
+                if nmpq in mapped_physical_qubits:
+                    continue
+                if tm[mpq, nmpq] == 1:
+                    npq.append((mpq, nmpq))
+
+        # What are the best mappings to these qubits (max connection non mapped logical qubit)
+        for mpq,nmpq in npq:
+            max_correlation = -1
+            max_logical_qubit = -1
+            max_physical_qubit = -1
+            for nmlq in range(pp.num_qubits):
+                if nmlq in mapped_logical_qubits:
+                    continue
+                mlq = mapping_reverse[mpq]
+                correlation = correlations[nmlq, mlq] 
+                if max_correlation == -1 or correlation > max_correlation:
+                    max_correlation = correlation
+                    max_logical_qubit = nmlq
+                    max_physical_qubit = nmpq
+
+        mapped_logical_qubits.append(max_logical_qubit)
+        mapped_physical_qubits.append(max_physical_qubit)
+        mapping[max_logical_qubit] = max_physical_qubit
+        mapping_reverse[max_physical_qubit] = max_logical_qubit
+    return mapping
+
+def center_physical_qubit(tm):
+    # Find group of qubits having maximum degree, and degree of 1
+    max_degree = 0
+    max_degree_qubits = []
+    one_degree_qubits = []
+    for i in range(len(tm)):
+        degree = 0
+        for j in range(len(tm)):
+            if i != j and tm[i,j] == 1:
+                degree += 1
+        if degree > max_degree:
+            max_degree = degree
+            max_degree_qubits = [i]
+        elif degree == max_degree:
+            max_degree_qubits.append(i)
+        if degree == 1:
+            one_degree_qubits.append(i)
+
+    if len(one_degree_qubits) == 0:
+        return max_degree_qubits[0]  # If topology is circular
 
     # calculate shortest path topologymtarix with floyd warshall
     apsp = floydWarshall(tm)
 
-    # find center of physical qubits
-    physical_center = find_center_of_topology(tm,apsp)
+    # find qubit which distance to closest qubit is greatest
+    max_distance_to_edge = -1
+    max_distance_qubit = -1
+    for q1 in max_degree_qubits:
+        min_distance_to_edge = -1
+        for q2 in one_degree_qubits:
+            dist = apsp[q1, q2]
+            if min_distance_to_edge == -1 or dist < min_distance_to_edge:
+                min_distance_to_edge = dist
+        if min_distance_to_edge > max_distance_to_edge:
+            max_distance_to_edge = min_distance_to_edge
+            max_distance_qubit = q1
+    return max_distance_qubit
 
-    # find heaviest logical qubit
-    logical_center = heaviest_qubit(pp)
-    print('Logical center:', logical_center)    
-    input()
-
-    # Start mapping
-    mapped_physical_qubits = set()
-    mapped_logical_qubits = set()
-    mapping = [-1 for x in range(num_logical_qubits)]
-
-    mapping[logical_center] = physical_center
-    mapped_physical_qubits.add(physical_center)
-    mapped_logical_qubits.add(logical_center)
-
-    while len(mapped_logical_qubits)<num_logical_qubits: 
-        max_edge_weight = -1
-        selected_lq1 = -1
-        selected_pq1 = -1
-        for lq2 in mapped_logical_qubits:
-            pq2 = mapping[lq2]
-            for pq1 in range(num_physical_qubits):
-                if tm[pq2,pq1] == 0 or pq1 not in mapped_physical_qubits:
-                    continue
-                for lq1 in range(num_logical_qubits):
-                    if lq1 in mapped_logical_qubits:
-                        continue
-                    if max_edge_weight == -1 or edges[min(lq1,lq2),max(lq1,lq2)] > max_edge_weight:
-                        max_edge_weight = edges[min(lq1,lq2),max(lq1,lq2)]
-                        selected_lq1 = lq1
-                        selected_pq1 = pq1
-
-        mapping[selected_lq1] = selected_pq1
-        mapped_physical_qubits.add(selected_pq1)
-        mapped_logical_qubits.add(selected_lq1)
-        print(mapping)
-    return mapping
-
-
-def find_center_of_topology(tm, apsp):
-    leafs = []
-    for i in range (len(tm)):
-        if np.sum(tm[i,:]) == 1:
-            leafs.append(i)
-    max_min_distance = -1
-    for i in range(len(tm)):
-        min_distance = -1
-        for j in leafs:
-            if i==j:
-                dist = 0
-            else:
-                dist = apsp[i,j]
-            if min_distance == -1 or dist < min_distance:
-                min_distance = dist
-        if max_min_distance == -1 or min_distance > max_min_distance:
-            max_min_distance = min_distance
-            center = i
-    return center
-    
-def heaviest_qubit(pp):
-    num_qubits = pp.num_qubits
-
-    heaviest = -1
-    max_weight = -1
-    for q in range(num_qubits):
-        weight = 0
-        for gadget in pp.pauli_gadgets:
-            if gadget.paulis[q] != I:
-                weight += 1
-        if weight > max_weight:
-            max_weight = weight
-            heaviest = q
-    return heaviest
+def qubit_correlations(pp):
+    correlations = np.zeros((pp.num_qubits, pp.num_qubits), dtype=int)
+    for gadget in pp.pauli_gadgets:
+        for i in range(pp.num_qubits):
+            for j in range(pp.num_qubits):
+                if gadget.paulis[i] != I and gadget.paulis[j] != I:
+                    correlations[i,j] += 1
+    return correlations
 
 def attenuation(pp):
     attenuation = []
@@ -164,7 +455,7 @@ def map_graphs_by_chains(edges, tm):
 
     # 2) map rest of the qubits
     while len(mapped_logical_qubits)<num_logical_qubits: # Continue until all qubits are mapped
-        max_next = search_max_next(edges, mapped_logical_qubits) # Search non mapped logical qubit attached to mapped logical qubits 
+        max_next = search_max_next(edges, mapped_logical_qubits) # Search non mapped logical qubit attached to mapped logical qubit having max weight 
         
         if max_next == None: # no attached qubits found, have to take random logical qubit
             for i in random_sample(0,num_logical_qubits):
@@ -178,7 +469,7 @@ def map_graphs_by_chains(edges, tm):
                     break
         else: # next logical qubit was found
             mapped_logical_qubits.add(max_next[1])
-            for i in random_sample(0,num_physical_qubits):   # map logical qubit to random connected physical qubits
+            for i in random_sample(0,num_physical_qubits):   # map logical qubit to physical qubit wich is not mapped and which is connected to mapped other end of edge
                 if tm[mapping[max_next[0]],i] == 1 and i not in mapped_physical_qubits:
                     mapping[max_next[1]] = i
                     mapped_physical_qubits.add(i)
