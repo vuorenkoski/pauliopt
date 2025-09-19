@@ -132,13 +132,14 @@ if __name__ == "__main__":
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20))
 #    steps = list(range(20, 220, 20))
-    backend = {'name': 'quito', 'qubits': 5}
-    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 9}
-#    backend = {'name': 'line', 'qubits': 6}
-    logical_qubits = 9
-    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps)
-    input()
+#    backend = {'name': 'quito', 'qubits': 5}
+#    backend = {'name': 'guadalupe', 'qubits': 16}
+#    backend = {'name': 'grid', 'qubits': 9}
+    backend = {'name': 'line', 'qubits': 6}
+#    backend = {'name': 'complete', 'qubits': 6}
+    logical_qubits = 6
+#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps)
+#    input()
 
     random.seed(42)
     pp = create_random_pauli_polynomial(3, 80, seed=42, empty_qubits=0)
@@ -148,10 +149,10 @@ if __name__ == "__main__":
 #    all_mappings(pp, backend, synth_method=synth_method)
 #    input()
 
-    gadgets = 6
+    gadgets = 10
     seed = 43
-    logical_qubits = 4
-    physical_qubits = 9
+    logical_qubits = 6
+    physical_qubits = 6
     topology = 'line'
 
     print('\n\nstart-------------------------------------------------')

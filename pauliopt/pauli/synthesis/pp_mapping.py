@@ -11,7 +11,8 @@ def I_index_mapping(pp: PauliPolynomial, topo: Topology):
     tm = create_topology_matrix(topo)
 #    weight = attenuation(pp)
     edges = edges_by_I_index(pp)
-    mapping = map_graphs_by_chains(edges,tm)
+#    mapping = map_graphs_by_chains(edges,tm)
+    mapping = map_graphs_from_center(edges,tm,pp)
     return mapping
 
 def edges_by_I_index(pp: PauliPolynomial):
@@ -27,10 +28,99 @@ def edges_by_I_index(pp: PauliPolynomial):
         for q2 in range(q1+1,num_qubits):
             I_index = 0
             for i, gadget in enumerate(pp.pauli_gadgets):
-                if (gadget.paulis[q1] == I) == (gadget.paulis[q2] == I):
+                if (gadget.paulis[q1] != I) and (gadget.paulis[q2] != I):
                     I_index += 1
             edges[q1,q2] = I_index
     return edges
+
+def map_graphs_from_center(edges, tm, pp):
+    """Map logical qubits to physical qubits. First create center of physical qubits, then heaviest center of logical qubits, and map them together.
+    After that map rest of the logical qubits to physical qubits from starting haeviest pair which first qubit is mapped and second is not.
+    :param edges: Edge weights as a numpy array
+    :param tm: Topology as numpy-matrix
+    :return: List of logical qubits mapped to physical qubits
+    """
+    num_physical_qubits = len(tm)
+    num_logical_qubits = len(edges)
+
+    # calculate shortest path topologymtarix with floyd warshall
+    apsp = floydWarshall(tm)
+
+    # find center of physical qubits
+    physical_center = find_center_of_topology(tm,apsp)
+
+    # find heaviest logical qubit
+    logical_center = heaviest_qubit(pp)
+    print('Logical center:', logical_center)    
+    input()
+
+    # Start mapping
+    mapped_physical_qubits = set()
+    mapped_logical_qubits = set()
+    mapping = [-1 for x in range(num_logical_qubits)]
+
+    mapping[logical_center] = physical_center
+    mapped_physical_qubits.add(physical_center)
+    mapped_logical_qubits.add(logical_center)
+
+    while len(mapped_logical_qubits)<num_logical_qubits: 
+        max_edge_weight = -1
+        selected_lq1 = -1
+        selected_pq1 = -1
+        for lq2 in mapped_logical_qubits:
+            pq2 = mapping[lq2]
+            for pq1 in range(num_physical_qubits):
+                if tm[pq2,pq1] == 0 or pq1 not in mapped_physical_qubits:
+                    continue
+                for lq1 in range(num_logical_qubits):
+                    if lq1 in mapped_logical_qubits:
+                        continue
+                    if max_edge_weight == -1 or edges[min(lq1,lq2),max(lq1,lq2)] > max_edge_weight:
+                        max_edge_weight = edges[min(lq1,lq2),max(lq1,lq2)]
+                        selected_lq1 = lq1
+                        selected_pq1 = pq1
+
+        mapping[selected_lq1] = selected_pq1
+        mapped_physical_qubits.add(selected_pq1)
+        mapped_logical_qubits.add(selected_lq1)
+        print(mapping)
+    return mapping
+
+
+def find_center_of_topology(tm, apsp):
+    leafs = []
+    for i in range (len(tm)):
+        if np.sum(tm[i,:]) == 1:
+            leafs.append(i)
+    max_min_distance = -1
+    for i in range(len(tm)):
+        min_distance = -1
+        for j in leafs:
+            if i==j:
+                dist = 0
+            else:
+                dist = apsp[i,j]
+            if min_distance == -1 or dist < min_distance:
+                min_distance = dist
+        if max_min_distance == -1 or min_distance > max_min_distance:
+            max_min_distance = min_distance
+            center = i
+    return center
+    
+def heaviest_qubit(pp):
+    num_qubits = pp.num_qubits
+
+    heaviest = -1
+    max_weight = -1
+    for q in range(num_qubits):
+        weight = 0
+        for gadget in pp.pauli_gadgets:
+            if gadget.paulis[q] != I:
+                weight += 1
+        if weight > max_weight:
+            max_weight = weight
+            heaviest = q
+    return heaviest
 
 def attenuation(pp):
     attenuation = []
