@@ -245,15 +245,15 @@ if __name__ == "__main__":
 #    steps = [320]
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
-#    backend = {'name': 'grid', 'qubits': 9}
-    backend = {'name': 'line', 'qubits': 6}
-    logical_qubits = 6
+    backend = {'name': 'grid', 'qubits': 9}
+#    backend = {'name': 'line', 'qubits': 6}
+    logical_qubits = 9
     max_legs = None
     random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
     input()
 
     seed = 42
-    gadgets = 40
+    gadgets = 20
     backend = {'name': 'line', 'qubits': 6}
     logical_qubits = 6
     random.seed(seed)
@@ -293,10 +293,11 @@ if __name__ == "__main__":
 #    order = [3, 24, 26, 27, 49, 63, 64, 50, 20, 4, 55, 32, 17, 8, 45, 47, 57, 51, 11, 2, 37, 61, 30, 38, 43, 34, 66, 46, 14, 65, 36, 29, 70, 19, 52, 0, 60, 31, 39, 1, 5, 12, 9, 10, 54, 16, 69, 33, 18, 44, 25, 58, 68, 35, 15, 7, 67, 48, 28, 21, 42, 40, 56, 6, 62, 23, 22, 41, 53, 59, 13]
 #    order =  [3, 24, 26, 27, 49, 63, 64, 65, 47, 57, 38, 14, 34, 5, 8, 66, 20, 61, 29, 32, 55, 33, 68, 40, 10, 31, 54, 39, 17, 16, 59, 67, 4, 51, 44, 58, 25, 50, 9, 23, 2, 69, 0, 21, 45, 7, 48, 12, 6, 28, 11, 37, 56, 13, 60, 62, 1, 30, 43, 41, 46, 35, 36, 18, 19, 22, 42, 70, 53, 15, 52]
 #    order = [0, 4, 9, 5, 8, 15, 3, 12, 1, 7, 6, 13, 18, 11, 17, 16, 2, 14, 10] # optimal mapping
-#    order = [3, 10, 12, 14, 5, 1, 11, 0, 8, 16, 7, 4, 13, 2, 9, 15, 6]
+    order = [0, 4, 8, 14, 18, 3, 2, 13, 15, 5, 9, 17, 7, 11, 16, 10, 1, 6, 12]
+
     print('manual order')
     print_pp(pp, order=order)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp.copy(), topo, debug=False, print_order=order, random_sel=False)
+    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp.copy(), topo, debug=True, print_order=order, random_sel=False)
 #    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
     print('CNOT count:',cnot_count(circ_out))
     print('Benchmarks:', benchmarks)
