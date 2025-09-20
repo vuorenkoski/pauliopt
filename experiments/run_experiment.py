@@ -231,7 +231,7 @@ def test_random_gadget_ordering(pp, backend, mapping, synth_method, rounds=1000,
     return int(sum_cx / count)
 
 if __name__ == "__main__":
-    verify = False
+    verify = True
     methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
     mapping_method = I_index_mapping
 #    mapping_method = zx_index_mapping
