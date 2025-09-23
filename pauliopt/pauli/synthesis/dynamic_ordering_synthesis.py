@@ -1,4 +1,5 @@
 import networkx as nx
+from experiments.utils import cnot_count_density
 import numpy as np
 import random, time
 
@@ -118,8 +119,8 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     for gate in qc_out.gates:
         if isinstance(gate, CX):
             pre_cx += 1
-
-    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx}
+    density = cnot_count_density(qc_out)
+    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density}
 
 def create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees, last_edge, gadget_index):
     """Update connection datastructure based on qubit_map provided by networkx steinertree algorithm."""

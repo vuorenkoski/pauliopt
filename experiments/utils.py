@@ -78,7 +78,7 @@ def create_random_phase_gadget(
 
 
 def create_random_pauli_polynomial(
-        num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angels=None, seed=None, empty_qubits=0
+        num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angels=None, seed=None, empty_qubits=0, allowed_legs=[X, Y, Z]
 ):
     if min_legs is None:
         min_legs = 1
@@ -92,7 +92,7 @@ def create_random_pauli_polynomial(
     pp = PauliPolynomial(num_qubits)
     for _ in range(num_gadgets):
         pp >>= create_random_phase_gadget(
-            num_qubits, min_legs, max_legs, allowed_angels, empty_qubits=empty_qubits
+            num_qubits, min_legs, max_legs, allowed_angels, empty_qubits=empty_qubits, allowed_legs=allowed_legs
         )
 
     return pp
@@ -123,6 +123,13 @@ def cnot_count(circ):
         if isinstance(gate, CX):
             count += 1
     return count
+
+def cnot_count_density(circ):
+    density = np.zeros((circ.n_qubits, circ.n_qubits), dtype=int)
+    for gate in circ.gates:
+        if isinstance(gate, CX):
+            density[gate.control, gate.target] += 1
+    return density  
 
 def print_pp(pp, order=None):
     num_qubits = pp.num_qubits

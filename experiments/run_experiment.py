@@ -7,8 +7,8 @@ from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, zx_index_mappin
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
-from pauliopt.pauli.pauli_polynomial import PauliPolynomial
-from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
+from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
+from experiments.utils import cnot_count_density, permute_with_mapping, qubit_correlation_sum, random_mapping, create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
 from experiments.utils import cnot_count, print_pp, extend_gadgets, aggregate_data, get_topo, aggregate_data_precx, I_index
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
@@ -18,8 +18,7 @@ def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp_circ = pp2.to_qiskit()
     return verify_equality(pp_circ,circ)
 
-
-def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=100, nr_steps=5, rounds=20, max_legs=None, 
+def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=None, nr_gadgets=100, nr_steps=5, rounds=20, max_legs=None, 
                             verify=True, mapping_method=I_index_mapping, steps=None):
     topo = get_topo(backend['name'], backend['qubits'])
     if logical_qubits is None:
@@ -44,6 +43,82 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                 pp = create_random_pauli_polynomial(logical_qubits, num_gadgets)
             else:
                 pp = create_random_pauli_polynomial(logical_qubits, num_gadgets, min_legs=1, max_legs=max_legs)
+            pp = simplify_pauli_polynomial(pp, allow_acs=True)
+            mapping_time = time.time()
+            map = mapping_method(pp, topo)
+#            print(qubit_order(map, physical_qubits=backend['qubits']))
+            mapping_time = int((time.time() - mapping_time) * 1000)
+            pp_m = permute_with_mapping(map, pp, topo.num_qubits)
+            pp_r = permute_with_mapping(trivial_mapping, pp, topo.num_qubits)
+
+            for synth_method in methods:
+                start = time.time()
+                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo)
+                if verify:
+                    correct = check_circuit_equivalence(pp_m.copy(), circ_out, gadget_perm, perm)
+                    if not correct:
+                        print('Circuit equivalence failed for', synth_method.__name__, 'with algorithm mapping', mapping_method.__name__)
+                        input()
+                column = {
+                            'n_rep': i,
+                            'num_qubits': logical_qubits,
+                            'n_gadgets': num_gadgets,
+                            'method': synth_method.__name__,
+                            'mapping': 'algorithm',
+                            'cx': cnot_count(circ_out),
+                        } | benchmarks | {'time': mapping_time + int((time.time()-start) * 1000)}
+                df.loc[len(df)] = column
+                start = time.time()
+                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo)
+                if verify:
+                    correct = check_circuit_equivalence(pp_r.copy(), circ_out, gadget_perm, perm)
+                    if not correct:
+                        print('Circuit equivalence failed for', synth_method.__name__, 'with random mapping', mapping_method.__name__)
+                        input()
+                column = {
+                            'n_rep': i,
+                            'num_qubits': logical_qubits,
+                            'n_gadgets': num_gadgets,
+                            'method': synth_method.__name__,
+                            'mapping': 'random',
+                            'cx': cnot_count(circ_out),
+                        } | benchmarks | {'time': int((time.time()-start) * 1000)}
+                df.loc[len(df)] = column
+        df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
+        print(df2.tail(1).to_string(header=False)) 
+    df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
+    df2.to_csv('aggregated.csv')
+    print(df2.to_string())
+    df2 = aggregate_data_precx(df, methods[0].__name__, methods[1].__name__)
+    df2.to_csv('aggregated_precx.csv')
+    print('Pre-cx data')
+    print(df2.to_string())
+
+def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=100, nr_steps=5, rounds=20, max_legs=None, 
+                            verify=True, mapping_method=I_index_mapping, steps=None, allowed_legs=[X,Y,Z]):
+    topo = get_topo(backend['name'], backend['qubits'])
+    if logical_qubits is None:
+        logical_qubits = backend['qubits']
+    if logical_qubits > backend['qubits']:
+        raise ValueError('Logical qubits cannot be more than physical qubits')
+    print('----------------------------------Experiment')
+    print('Backend:', backend['name'])
+    print('Num physical qubits:',  backend['qubits'])
+    print('Num logical qubits:',  logical_qubits)
+    print('Random iterations:', rounds)
+    print('Mapping method:', mapping_method.__name__)
+    print('Synthesis methods:', [m.__name__ for m in methods])
+    print('Verifying:', verify)
+    df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','time','pre-cx'])
+    if not steps:
+        steps = list(range(nr_steps, nr_gadgets, nr_steps))
+    for num_gadgets in steps:
+        for i in range(rounds):
+#            print(i)
+            if max_legs is None:
+                pp = create_random_pauli_polynomial(logical_qubits, num_gadgets, allowed_legs=allowed_legs)
+            else:
+                pp = create_random_pauli_polynomial(logical_qubits, num_gadgets, min_legs=1, max_legs=max_legs, allowed_legs=allowed_legs)
             pp = simplify_pauli_polynomial(pp, allow_acs=True)
             mapping_time = time.time()
             map = mapping_method(pp, topo)
@@ -93,6 +168,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
     df2.to_csv('aggregated_precx.csv')
     print('Pre-cx data')
     print(df2.to_string())
+
 
 def all_mappings(pp, backend, synth_method=pauli_polynomial_steiner_gray_clifford, verbose=True):
     topo = get_topo(backend['name'], backend['qubits'])
@@ -151,8 +227,11 @@ def all_mappings(pp, backend, synth_method=pauli_polynomial_steiner_gray_cliffor
     df.to_csv(output_csv)
     return min_cx_mapping, max_cx_mapping, int(cx_sum / count)
 
-def qubit_order(mapping):
-    order = [0 for _ in range(len(mapping))]
+def qubit_order(mapping, physical_qubits=None):
+    if physical_qubits is None:
+        order = [-1 for _ in range(len(mapping))]
+    else:
+        order = [-1 for _ in range(physical_qubits)]
     for i in range(len(mapping)):
         order[mapping[i]] = i
     return order
@@ -231,7 +310,7 @@ def test_random_gadget_ordering(pp, backend, mapping, synth_method, rounds=1000,
     return int(sum_cx / count)
 
 if __name__ == "__main__":
-    verify = True
+    verify = False
     methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
     mapping_method = I_index_mapping
 #    mapping_method = zx_index_mapping
@@ -247,14 +326,17 @@ if __name__ == "__main__":
 #    backend = {'name': 'guadalupe', 'qubits': 16}
     backend = {'name': 'grid', 'qubits': 9}
 #    backend = {'name': 'line', 'qubits': 6}
+    trivial_mapping = [6,7,8,11,12,13]
     logical_qubits = 9
     max_legs = None
-    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+#    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, 
+                            allowed_legs=[Z,X,Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
     input()
 
     seed = 42
-    gadgets = 20
-    backend = {'name': 'line', 'qubits': 6}
+    gadgets = 80
+    backend = {'name': 'grid', 'qubits': 25}
     logical_qubits = 6
     random.seed(seed)
     pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0)
@@ -265,9 +347,9 @@ if __name__ == "__main__":
     synth_method = pauli_polynomial_dynamic_ordering
 #    synth_method = pauli_polynomial_steiner_gray_clifford
     mapping = mapping_method(pp, topo)
-#    mapping = get_mapping_from_order([2, 1, 5, 4, 3, 0]) # best with 80,42
+    mapping = get_mapping_from_order([1, 2, 0, 4, 3, 5]) # best with 80,42
 #    mapping = get_mapping_from_order([0, 1, 2, 3, 4, 5]) 
-#    mapping = get_mapping_from_order([2, 4, 0, 3, 5, 1]) # worst with 80,42
+    mapping = get_mapping_from_order([4, 1, 0, 3, 5, 2]) # worst with 80,42
     print('mapping algorithm order', qubit_order(mapping))
 #    test_randomness(pp, backend, mapping, synth_method, rounds=10000)
 
@@ -283,7 +365,7 @@ if __name__ == "__main__":
 #    input()
 
 #    test_randomness_with_several_pps(backend, synth_method, logical_qubits, 20)
-#    input()
+#   input()
 
     pp = permute_with_mapping(mapping, pp, topo.num_qubits)
     order = order_gadgets(pp, topo)
@@ -293,14 +375,15 @@ if __name__ == "__main__":
 #    order = [3, 24, 26, 27, 49, 63, 64, 50, 20, 4, 55, 32, 17, 8, 45, 47, 57, 51, 11, 2, 37, 61, 30, 38, 43, 34, 66, 46, 14, 65, 36, 29, 70, 19, 52, 0, 60, 31, 39, 1, 5, 12, 9, 10, 54, 16, 69, 33, 18, 44, 25, 58, 68, 35, 15, 7, 67, 48, 28, 21, 42, 40, 56, 6, 62, 23, 22, 41, 53, 59, 13]
 #    order =  [3, 24, 26, 27, 49, 63, 64, 65, 47, 57, 38, 14, 34, 5, 8, 66, 20, 61, 29, 32, 55, 33, 68, 40, 10, 31, 54, 39, 17, 16, 59, 67, 4, 51, 44, 58, 25, 50, 9, 23, 2, 69, 0, 21, 45, 7, 48, 12, 6, 28, 11, 37, 56, 13, 60, 62, 1, 30, 43, 41, 46, 35, 36, 18, 19, 22, 42, 70, 53, 15, 52]
 #    order = [0, 4, 9, 5, 8, 15, 3, 12, 1, 7, 6, 13, 18, 11, 17, 16, 2, 14, 10] # optimal mapping
-    order = [0, 4, 8, 14, 18, 3, 2, 13, 15, 5, 9, 17, 7, 11, 16, 10, 1, 6, 12]
+#    order = [0, 4, 8, 14, 18, 3, 2, 13, 15, 5, 9, 17, 7, 11, 16, 10, 1, 6, 12]
 
     print('manual order')
     print_pp(pp, order=order)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp.copy(), topo, debug=True, print_order=order, random_sel=False)
+    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp.copy(), topo, debug=False, print_order=order, random_sel=False)
 #    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
     print('CNOT count:',cnot_count(circ_out))
-    print('Benchmarks:', benchmarks)
+    print('Pre-cx:', benchmarks['pre-cx'])
+    print('Density:\n', benchmarks['density'])
     print('seed',seed)
     print('gadget perm', gadget_perm)
     print()
