@@ -124,6 +124,19 @@ def cnot_count(circ):
             count += 1
     return count
 
+def cnot_depth(circ):
+    q_depth = [0 for _ in range(circ.n_qubits)]
+    for gate in circ.gates:
+        if isinstance(gate, CX):
+            max_depth = max(q_depth[gate.control], q_depth[gate.target])
+            q_depth[gate.control] = max_depth + 1
+            q_depth[gate.target] = max_depth + 1
+    depth = 0
+    for i in range(circ.n_qubits):
+        if q_depth[i] > depth:
+            depth = q_depth[i]
+    return depth
+
 def cnot_count_density(circ):
     density = np.zeros((circ.n_qubits, circ.n_qubits), dtype=int)
     for gate in circ.gates:
@@ -162,7 +175,7 @@ def print_pp(pp, order=None):
 
 
 def aggregate_data(df, method1, method2):
-    df2 = df.drop(['n_rep','num_qubits','pre-cx'], axis=1)
+    df2 = df.drop(['n_rep','num_qubits','pre-cx','cx_depth'], axis=1)
     df_1 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx':'do','time':'do (ms)'})  
     df_1m = df2.loc[(df['mapping'] == 'algorithm') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx':'do+mapping', 'time':'dom (ms)'})  
     df_2 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method2)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx':'sg','time':'sg (ms)'})  
@@ -179,12 +192,12 @@ def aggregate_data(df, method1, method2):
     df3 = df3.set_index('gadgets')
     return df3
 
-def aggregate_data_precx(df, method1, method2):
-    df2 = df.drop(['n_rep','num_qubits','cx'], axis=1)
-    df_1 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'pre-cx':'do','time':'do (ms)'})  
-    df_1m = df2.loc[(df['mapping'] == 'algorithm') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'pre-cx':'do+mapping', 'time':'dom (ms)'})  
-    df_2 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method2)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'pre-cx':'sg','time':'sg (ms)'})  
-    df_2m = df2.loc[(df['mapping'] == 'algorithm') & (df['method'] == method2)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'pre-cx':'sg+mapping', 'time':'sgm (ms)'})  
+def aggregate_data_depth(df, method1, method2):
+    df2 = df.drop(['n_rep','num_qubits','pre-cx','cx'], axis=1)
+    df_1 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx_depth':'do','time':'do (ms)'})  
+    df_1m = df2.loc[(df['mapping'] == 'algorithm') & (df['method'] == method1)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx_depth':'do+mapping', 'time':'dom (ms)'})  
+    df_2 = df2.loc[(df['mapping'] == 'random') & (df['method'] == method2)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx_depth':'sg','time':'sg (ms)'})  
+    df_2m = df2.loc[(df['mapping'] == 'algorithm') & (df['method'] == method2)].drop(['mapping', 'method'], axis=1).reset_index(drop=True).groupby(['n_gadgets']).mean().round(1).reset_index().rename(columns={'cx_depth':'sg+mapping', 'time':'sgm (ms)'})  
     df3 = df_2.merge(df_2m, on=['n_gadgets'], how='left')
     df3 = df3.merge(df_1, on=['n_gadgets'], how='left')
     df3 = df3.merge(df_1m, on=['n_gadgets'], how='left')
@@ -286,19 +299,81 @@ def qubit_correlation_sum(pp, topo):
                 c_sum += correlations[i,j]
     return c_sum
 
+def create_datastructures(pp, topo):
+    num_qubits = pp.num_qubits
+    num_gadgets = len(pp.pauli_gadgets)
+    gadget_angles = []
+    removed_gadgets = np.zeros((num_gadgets), dtype=np.int8)
+    gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Dynamic matrix representing paulis
+    pauligraph = np.zeros((num_gadgets,num_qubits,num_qubits), dtype=np.int8) # Dynamic matrix represnting steiner trees
+    pauligraph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Dynamic matrix represnting degrees of node in steiner trees
+    last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) # Dynamic matrix representing last edges in tree branches
+    for i,gadget in enumerate(pp.pauli_gadgets):
+        for j in range(num_qubits):
+            last_edge[i,j] = -1
+            if gadget.paulis[j] == I:
+                gadget_data[j,i] = 0b00
+            elif gadget.paulis[j] == X:
+                gadget_data[j,i] = 0b01
+            elif gadget.paulis[j] == Y:
+                gadget_data[j,i] = 0b11
+            elif gadget.paulis[j] == Z:
+                gadget_data[j,i] = 0b10
+            else:
+                raise ValueError(f'Unknown Pauli {gadget_data[j,i]} in gadget {i}')
+        gadget_angles.append(gadget.angle)
+        tree_graph = steiner_tree(gadget_data, topo, i)
+        create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees, last_edge, i)
+    general_data = (gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge)
+    return general_data
+
+def steiner_tree(gadget_data,topo, gadget_index):
+    """ Uses NetworkX Steinertree algorithm to make steinertree from gadget."""
+    num_qubits, num_gadgets = gadget_data.shape
+    nodes = []
+    for i in range(num_qubits):
+        if gadget_data[i,gadget_index] != 0b00:
+            nodes.append(i)
+    steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
+    return nx.Graph(steiner_stree)
+
+def create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees, last_edge, gadget_index):
+    """Update connection datastructure based on qubit_map provided by networkx steinertree algorithm."""
+    num_qubits = pauligraph.shape[1]
+    for j in range(num_qubits):
+        if tree_graph.has_node(j):
+            pauligraph_degrees[gadget_index,j] = tree_graph.degree[j]
+            if tree_graph.degree[j] == 1:
+                last_edge[gadget_index,j] = list(tree_graph.edges(j))[0][1] # what is the border of edge node
+        else:
+            pauligraph_degrees[gadget_index,j] = 0
+    for j in range(num_qubits):
+        for k in range(num_qubits):
+            pauligraph[gadget_index,j,k] = 0
+    for edges in tree_graph.edges():
+        pauligraph[gadget_index, edges[0], edges[1]] = 1
+        pauligraph[gadget_index, edges[1], edges[0]] = 1
+
 def order_gadgets(pp, topo):
+    gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = create_datastructures(pp, topo)
     order = []
-    for i, gadget in enumerate(pp.pauli_gadgets):
-        nodes = []
-        min_from_edge = topo.num_qubits 
-        for j in range(len(gadget)):
-            if gadget[j] != I:
-                nodes.append(j)
-                from_edge = min(j, topo.num_qubits - j - 1)
-                min_from_edge = min(min_from_edge, from_edge)
-        steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
-        I_nodes = len(steiner_stree.nodes) - len(nodes)
-        order.append((i, len(steiner_stree.nodes), I_nodes, min_from_edge))
-    order.sort(key=lambda x: (x[1], x[2], -x[3]))
-    print(order)
+    for i in range(pp.num_gadgets):
+        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
+        for q in range(pp.num_qubits):
+            if gadget_data[q,i] != 0b00:
+                h_node = q
+        order.append((i, s_nodes, nodes+s_nodes, h_node))
+    order.sort(key=lambda x: (x[2], x[1], x[3],x[0]))
     return [i[0] for i in order]
+
+def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
+    """ Defines number of steiner nodes and regular nodes of steiner tree (pauligraph data)"""
+    num_qubits = gadget_data.shape[0]
+    nodes = 0
+    steiner_nodes = 0
+    for i in range(num_qubits):
+        if gadget_data[i, gadget_index] != 0b00:
+            nodes += 1
+        elif pauligraph_degrees[gadget_index, i] > 0:
+            steiner_nodes += 1
+    return steiner_nodes, nodes
