@@ -69,6 +69,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     general_data = (gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge)
     circ_data = (qc_out, qc_prop)
 
+    debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
 
     # Main loop going through gadgets starting from smallest
@@ -77,6 +78,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
         next = next_gadget(general_data)
+        debug and print('-------Next gadget:', next)
         num_legs = 0
         for j in range(num_qubits):
             if gadget_data[j,next] != 0b00:
@@ -89,11 +91,11 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
         while num_legs > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
+            debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
             removed_gadgets_num += rgadgets
             if gadget_data[edge[0], next] == 0b00:
                 num_legs -= 1
-            debug and print('-------Edge removed:', edge, 'gates:', gates, 'gadget', next)
             debug and print_sorted_gd(gadget_data, order=print_order)
             debug and input()
 
@@ -396,8 +398,7 @@ def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2
         q2 = last_edge[gadget_index,q1]
 
         # There are only two neighbouring qubits left which matches for cnot
-        if pauligraph_degrees[gadget_index,q2] == 1:
-            if (q1 == qubit1 and q2 == qubit2) or (q1 == qubit2 and q2 == qubit1):
+        if pauligraph_degrees[gadget_index,q2] == 1 and ((q1 == qubit1 and q2 == qubit2) or (q1 == qubit2 and q2 == qubit1)):
                 if pauli1 == 0b00 or pauli2 == 0b00:
                     remove_connection(general_data, gadget_index, qubit1, qubit2)
                     removed_connections += 1
@@ -793,11 +794,13 @@ def check_cdconns_integrity(pauligraph, pauligraph_degrees, gadget_data, last_ed
                 print('ERROR: pauligraph_degrees does not match pauligraph for gadget', g)
                 print('pauligraph_degrees:', pauligraph_degrees[g])
                 print('pauligraph:', pauligraph[g])
+                print_sorted_gd(gadget_data)
                 input()
             if pauligraph_degrees[g,q] < 0:
                 print('ERROR: negative degree for gadget', g, 'qubit', q)
                 print('pauligraph_degrees:', pauligraph_degrees[g])
                 print('pauligraph:', pauligraph[g])
+                print_sorted_gd(gadget_data)
                 input()
             if pauligraph_degrees[g,q] == 1 and last_edge[g,q] == -1:
                 print('ERROR: last_edge is -1 for gadget', g, 'qubit', q)
@@ -805,11 +808,13 @@ def check_cdconns_integrity(pauligraph, pauligraph_degrees, gadget_data, last_ed
                 print('last edge:', last_edge[g])
                 print('pauligraph_degrees:', pauligraph_degrees[g])
                 print('pauligraph:', pauligraph[g])
+                print_sorted_gd(gadget_data)
                 input() 
             if pauligraph_degrees[g,q] == 0 and gadget_data[q,g] != 0b00 and pauligraph_degrees[g].sum() > 0:
                 print('ERROR: degree is 0 but gadget_data is not I for gadget', g, 'qubit', q)
                 print('pauligraph_degrees:', pauligraph_degrees[g])
                 print('gadget_data:', gadget_data[:,g])
+                print_sorted_gd(gadget_data)
                 input()
 
 def check_equal_gates():
