@@ -12,7 +12,6 @@ def I_index_mapping(pp: PauliPolynomial, topo: Topology):
     # Difference to forest: I-index is the same, but finding optimal mappings after initial is little bit different.
     tm = create_topology_matrix(topo)
     weights = edges_by_I_index(pp)
-#    print(weights)
 #    mapping = map_graphs_by_chains(weights, tm)
     mapping = map_graphs_from_center(weights, pp, tm)
     return mapping
@@ -29,13 +28,9 @@ def edges_by_I_index(pp: PauliPolynomial):
     for q1 in range(num_qubits):
         for q2 in range(num_qubits):
             I_index = 0
-            for i, gadget in enumerate(pp.pauli_gadgets):
+            for gadget in pp.pauli_gadgets:
                 if (gadget.paulis[q1] != I) and (gadget.paulis[q2] != I):
-#                if (gadget.paulis[q1] != I) and (gadget.paulis[q2] != I) and (gadget.paulis[q1] == gadget.paulis[q2]):
-                    I_index += 10
-                    if similar_paulis(gadget.paulis[q1], gadget.paulis[q2]):
-#                    if  (gadget.paulis[q1] == gadget.paulis[q2]):
-                        I_index += 0
+                    I_index += 1
             edges[q1,q2] = I_index
     return edges
 

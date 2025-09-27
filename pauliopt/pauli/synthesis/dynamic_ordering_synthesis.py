@@ -1,10 +1,10 @@
 import networkx as nx
 from experiments.utils import cnot_count_density
 import numpy as np
-import random, time
+import random
 
 from pauliopt.clifford.clifford_tableau import CliffordTableau
-from pauliopt.gates import CX, H, Vdg, Sdg
+from pauliopt.gates import CX, Vdg, Sdg
 from pauliopt.circuits import Circuit
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial
 from pauliopt.pauli_strings import I, X, Y, Z
@@ -21,12 +21,12 @@ from tests.pauli.utils import verify_equality
 # Architecture agnostic version: https://arxiv.org/abs/2404.03280
 # This have two major differences: 1) does not consider topology, 2) does not allow ordering
 
-# This six different single qubit gates are used in the algorithm: I, V, S, VS, SV, SVS(H)
+# This six different single qubit gates are used in the algorithm: I, V, S, VS, SV
 
 # Time complexity O(m^2 n x) where n is number of qubits and m number of gadgets. X depends on topology: maximum degree of
 # physical qubit (for example in line it is 2 and in grid 4). max of x is n-1.
 # we have to process m gadgets and n qubits, so n*m
-# Each opearation takes 36*m*x time
+# Each opearation takes 9*m*x time
 
 def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
@@ -91,20 +91,17 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
             edge, gates = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
             removed_gadgets_num += rgadgets
-            debug and print('-------Next edge to remove:', edge, 'gates:', gates, 'gadget', next)
-            debug and print_sorted_gd(gadget_data, order=print_order)
-            debug and input()
             if gadget_data[edge[0], next] == 0b00:
                 num_legs -= 1
+            debug and print('-------Edge removed:', edge, 'gates:', gates, 'gadget', next)
+            debug and print_sorted_gd(gadget_data, order=print_order)
+            debug and input()
 
     # do clifford synthesis for the second part
     qc_prop_r = list(reversed(qc_prop))
     ct_prop = CliffordTableau(num_qubits)
-#    cnot_table = np.zeros((num_qubits, num_qubits), dtype=np.int8)
     for gate in qc_prop_r:
         ct_prop.append_gate(gate)
-#        if isinstance(gate, CX):
-#            cnot_table[gate.control, gate.target] += 1
     qc_prop_syn, permutation = ct_prop.to_clifford_circuit_perm_row_col(topo, include_swaps=False)
 
     circ_out = qc_out + qc_prop_syn
@@ -117,6 +114,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
             pre_cx += 1
     density = cnot_count_density(qc_out)
     return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density}
+
 
 def create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees, last_edge, gadget_index):
     """Update connection datastructure based on qubit_map provided by networkx steinertree algorithm."""
@@ -154,6 +152,7 @@ def check_for_singles(general_data, circ_data, perm_gadgets):
             removed_gadgets_num += 1
             remove_single(general_data, circ_data, perm_gadgets, i, qubit)
     return removed_gadgets_num
+
 
 def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     """ Remove gadget having single leg indicated by gadget_index."""
@@ -303,6 +302,7 @@ def next_gadget(general_data):
             closest = i
     return closest
 
+
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets):
     """apply single qubit gates and CNOT to all non-removed gates."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
@@ -384,7 +384,8 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
 
 
 def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2):
-    """ Update pauligraph and pauligraph_degrees for gadget. Loop through all edge pairs which are in the edge of branch. Check is there changes for those."""
+    """ Update pauligraph and pauligraph_degrees for gadget. Loop through all edge pairs which 
+    are in the edge of branch. Check is there changes for those."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
@@ -395,12 +396,13 @@ def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2
         q2 = last_edge[gadget_index,q1]
 
         # There are only two neighbouring qubits left which matches for cnot
-        if pauligraph_degrees[gadget_index,q2] == 1 and ((q1 == qubit1 and q2 == qubit2) or (q1 == qubit2 and q2 == qubit1)): # This is final pair
-            if pauli1 == 0b00 or pauli2 == 0b00:
-                remove_connection(general_data, gadget_index, qubit1, qubit2)
-                removed_connections += 1
-                gadget_removed = True
-                break
+        if pauligraph_degrees[gadget_index,q2] == 1:
+            if (q1 == qubit1 and q2 == qubit2) or (q1 == qubit2 and q2 == qubit1):
+                if pauli1 == 0b00 or pauli2 == 0b00:
+                    remove_connection(general_data, gadget_index, qubit1, qubit2)
+                    removed_connections += 1
+                    gadget_removed = True
+                    break
 
         # this gadget has exactly same edge as the original one
         elif q1 == qubit1 and q2 == qubit2: 
@@ -587,7 +589,6 @@ def apply_cnot(p1, p2):
     pauli2 = ((p1 ^ p2) & 0b01) | (p2 & 0b10)
     return pauli1, pauli2, phase
 
-
 def apply_single_and_cnot(gates, p1, p2):
     phase = 1
     first_gate, second_gate, cnot_reversed = gates
@@ -703,9 +704,8 @@ def get_gates(gate_set):
     :params gate_set: 72-bit integer coding possible gate combinations.
     :returns: list of tuples (first_qubit_gate, second_qubit_gate, cnot direction).
     """
-    # CHANGED SO THAT IT RETURNS ONLY 36 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
+    # CHANGED SO THAT IT RETURNS ONLY 9 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
     gates = []
-#    for i, cnot_reversed in enumerate([False, True]):
     for j, first_qubit in enumerate([apply_I, apply_vdg, apply_vs]):
         for k, second_qubit in enumerate([apply_vdg, apply_sdg, apply_sv]):
             gate = 1 << (j*3 + k)
@@ -722,7 +722,11 @@ def get_gate(gate_set):
         i +=1
     return first[i//3], second[i%3], False
 
+#
+#
+#
 # Functions for testing and debugging
+#
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     """Check if the circuit is equivalent to the circuit produced by cbnot-ladders from PauliPolynomial."""
