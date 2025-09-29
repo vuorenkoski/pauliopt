@@ -92,7 +92,7 @@ def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
-            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets)
+            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo)
             removed_gadgets_num += rgadgets
             if gadget_data[edge[0], next] == 0b00:
                 num_legs -= 1
@@ -305,7 +305,7 @@ def next_gadget(general_data):
     return closest
 
 
-def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets):
+def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo):
     """apply single qubit gates and CNOT to all non-removed gates."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     qc_out, qc_prop = circ_data
@@ -392,20 +392,22 @@ def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2
     num_qubits, num_gadgets = gadget_data.shape
     gadget_removed = False
     removed_connections = 0
-    for q1 in range(num_qubits): # Loop trough all edge pairs of of gadget
+
+    # Loop trough all edge pairs of of gadget which are end of branch
+    for q1 in range(num_qubits):
         if (q1!=qubit1 and q1!=qubit2) or (pauligraph_degrees[gadget_index,q1] != 1):
             continue
         q2 = last_edge[gadget_index,q1]
 
         # There are only two neighbouring qubits left which matches for cnot
         if pauligraph_degrees[gadget_index,q2] == 1 and ((q1 == qubit1 and q2 == qubit2) or (q1 == qubit2 and q2 == qubit1)):
-                if pauli1 == 0b00 or pauli2 == 0b00:
-                    remove_connection(general_data, gadget_index, qubit1, qubit2)
-                    removed_connections += 1
-                    gadget_removed = True
-                    break
+            if pauli1 == 0b00 or pauli2 == 0b00:
+                remove_connection(general_data, gadget_index, qubit1, qubit2)
+                removed_connections += 1
+                gadget_removed = True
+                break
 
-        # this gadget has exactly same edge as the original one
+        # this gadget has last edge matching for cnot
         elif q1 == qubit1 and q2 == qubit2: 
             if pauli1 == 0b00: # Chain shortens
                 remove_connection(general_data, gadget_index, qubit1, qubit2)
@@ -416,7 +418,7 @@ def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2
                         last_edge[gadget_index,qubit2] = i
                         break
 
-        # This gadget has same edge but reversed
+        # Same but reversed
         elif q1 == qubit2 and q2 == qubit1: 
             if pauli2 == 0b00: # Chain shortens
                 remove_connection(general_data, gadget_index, qubit1, qubit2)
@@ -427,41 +429,29 @@ def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2
                         last_edge[gadget_index,qubit1] = i
                         break
 
-        # edge is not and last edge in this gadget, but q1 is the first qubit of cnot
+        # edge is not and last edge in this gadget, but qubit1 is the last qubit in the branch
         elif q1 == qubit1:
-            if pauli1 == 0b00 and pauligraph_degrees[gadget_index,qubit1] == 1: # chain shortens
-                remove_connection(general_data, gadget_index, qubit1, q2)
+            if pauli1 == 0b00: # chain shortens
+                remove_connection(general_data, gadget_index, q1, q2)
                 removed_connections += 1
-                last_edge[gadget_index,qubit1] = -1
+                last_edge[gadget_index,q1] = -1
                 gadget_removed = follow_chain_until_not_I(general_data, gadget_index, q2, gadget_data[q2,gadget_index])
-            elif pauli2 != 0b00 and pauligraph_degrees[gadget_index,qubit2] == 0: # Branch extends towars qubit2
-                add_connection(general_data, gadget_index, qubit1, qubit2)
-                last_edge[gadget_index,qubit2] = qubit1
-                last_edge[gadget_index,qubit1] = -1
+            elif pauli2 != 0b00 and pauligraph_degrees[gadget_index,qubit2] == 0: # Branch extends towards qubit2
+                add_connection(general_data, gadget_index, q1, qubit2)
+                last_edge[gadget_index,qubit2] = q1
+                last_edge[gadget_index,q1] = -1
 
-        # Edge is not the last edge in this gadget but q1 is the second qubit of cnot
+        # Edge is not the last edge in this gadget but qubit2 is the last qubit the in branch
         elif q1 == qubit2:
-            if pauli2 == 0b00 and pauligraph_degrees[gadget_index,qubit2] == 1: # Branch shortens
-                remove_connection(general_data, gadget_index, qubit2, q2)
+            if pauli2 == 0b00: # Branch shortens
+                remove_connection(general_data, gadget_index, q1, q2)
                 removed_connections += 1
-                last_edge[gadget_index,qubit2] = -1
+                last_edge[gadget_index,q1] = -1
                 gadget_removed = follow_chain_until_not_I(general_data, gadget_index, q2, gadget_data[q2,gadget_index])
             elif pauli1 != 0b00 and pauligraph_degrees[gadget_index,qubit1] == 0: # Branch extends
-                add_connection(general_data, gadget_index, qubit1, qubit2)
-                last_edge[gadget_index,qubit1] = qubit2
-                last_edge[gadget_index,qubit2] = -1
-
-        # Edge is not the last edge in this gadget but q2 is the second qubit of cnot, new branch can emerge
-        elif q2 == qubit2:
-            if pauli1 != 0b00 and pauligraph_degrees[gadget_index,qubit1] == 0: # New branch
-                add_connection(general_data, gadget_index, qubit1, qubit2)
-                last_edge[gadget_index,qubit1] = qubit2
-
-        # Edge is not the last edge in this gadget but q2 is the first qubit of cnot
-        elif q2 == qubit1:
-            if pauli2 != 0b00 and pauligraph_degrees[gadget_index,qubit2] == 0: # New branch
-                add_connection(general_data, gadget_index, qubit1, qubit2)
-                last_edge[gadget_index,qubit2] = qubit1
+                add_connection(general_data, gadget_index, q1, qubit1)
+                last_edge[gadget_index,qubit1] = q1
+                last_edge[gadget_index,q1] = -1
 
     # If one of the qubits is in the midddle of chain
     # and other qubit is not in any branch and turns from I to pauli: new branch
