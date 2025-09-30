@@ -1,6 +1,6 @@
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I, X, Y, Z
 import numpy as np
-import random
+import random, time
 
 # Similar to I-index mapping: https://ieeexplore.ieee.org/abstract/document/10771974
 # Differences: how mapping is done after initial physical and logical qubit pair. I-index has more straightforward way: what logical qubit woul
@@ -10,10 +10,9 @@ def I_index_mapping(pp: PauliPolynomial, topo: Topology):
     # This mapping gives weghts to edges according to the how many paulis have both these legs
     # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit.
     # Difference to forest: I-index is the same, but finding optimal mappings after initial is little bit different.
-    tm = create_topology_matrix(topo)
     weights = edges_by_I_index(pp)
 #    mapping = map_graphs_by_chains(weights, tm)
-    mapping = map_graphs_from_center(weights, pp, tm)
+    mapping = map_graphs_from_center(weights, pp, topo)
     return mapping
 
 def edges_by_I_index(pp: PauliPolynomial):
@@ -313,79 +312,74 @@ def find_lightest_logical_qubit(pp):
             lightest_logical_qubit = i
     return lightest_logical_qubit
 
-def map_graphs_from_center(correlations, pp, tm):
-    num_logical_qubits = len(correlations)
+def map_graphs_from_center(correlations, pp, topo):
+    num_logical_qubits = pp.num_qubits
+    num_physical_qubits = topo.num_qubits
     mapped_logical_qubits = []
     mapped_physical_qubits = []
     mapping = [-1 for _ in range(num_logical_qubits)]
-    mapping_reverse = [-1 for _ in range(len(tm))]
-
-    # calculate shortest path topologymtarix with floyd warshall
-    apsp = floydWarshall(tm)
+    mapping_reverse = [-1 for _ in range(num_physical_qubits)]
 
     # Search most heavily connected qubit (has most non-I legs)
     heaviest_logical_qubit = find_heaviest_logical_qubit(pp)
 
     # Map this qubit to the center of graph
-    center = center_physical_qubit(tm, apsp)
+    center = center_physical_qubit(topo)
     mapped_logical_qubits.append(heaviest_logical_qubit)
     mapped_physical_qubits.append(center)
     mapping[heaviest_logical_qubit] = center
     mapping_reverse[center] = heaviest_logical_qubit
-#    print(heaviest_logical_qubit, center)
 
     while len(mapped_logical_qubits) < num_logical_qubits:
-        # find possible next physical qubits
-        # Qubit has connection of 1 to the nearest mapped physical qubit
-        # Of these select one which has shortest distance of second mapped physical qubit (if this is third)
-        # Of these selct those that have max free degree.
+        # find possible next physical qubits by these criteria:
+        #  - Non-mapped qubit is neighbour of mapped physical qubit
+        #  - Of these select one which has shortest distance of second mapped physical qubit (if this is third)
+        #  - Of these select those that have max free degree.
         # Select many if there are qual options
         npq = []
-        min_2nd_distance = len(tm)
+        min_2nd_distance = num_physical_qubits
         max_free_degree = -1
-        if len(mapped_physical_qubits) == 1:
-            for mpq in mapped_physical_qubits:
-                for nmpq in range(len(tm)):
-                    if nmpq in mapped_physical_qubits:
-                        continue
-                    if tm[mpq, nmpq] != 1:
-                        continue
-                    free_degree = 0
-                    for i in range(len(tm)):
-                        if tm[nmpq,i] == 1 and i not in mapped_physical_qubits:
-                            free_degree += 1
-                    if free_degree > max_free_degree:
-                        npq = [nmpq]
-                        max_free_degree = free_degree
-                    elif free_degree == max_free_degree:
-                        npq.append(nmpq)
-        else:
-            for mpq in mapped_physical_qubits:
-                for nmpq in range(len(tm)):
-                    if nmpq in mapped_physical_qubits:
-                        continue
-                    if tm[mpq, nmpq] != 1:
-                        continue
-                    free_degree = 0
-                    for i in range(len(tm)):
-                        if tm[nmpq,i] == 1 and i not in mapped_physical_qubits:
-                            free_degree += 1
+        for nmpq in range(num_physical_qubits):
 
-                    for pq in mapped_physical_qubits:
-                        if pq == mpq:
-                            continue
-                        if apsp[pq,nmpq] < min_2nd_distance:
-                            min_2nd_distance = apsp[pq,nmpq]
-                            npq = [nmpq]
-                            max_free_degree = free_degree
-                        elif apsp[pq,nmpq] == min_2nd_distance and free_degree > max_free_degree:
-                            min_2nd_distance = apsp[pq,nmpq]
-                            npq = [nmpq]
-                            max_free_degree = free_degree
-                        elif apsp[pq,nmpq] == min_2nd_distance and free_degree == max_free_degree:
-                            npq.append(nmpq)
+            # Check that qubiut is not mapped
+            if nmpq in mapped_physical_qubits:
+                continue
 
-        # select logical qubit having max sum score if mapped to nmpq
+            # Check that qubit is neighbour of mapped physical qubit
+            neighbour = False
+            for mpq in mapped_physical_qubits:
+                if topo.dist(mpq, nmpq) == 1:
+                    neighbour = True
+                    break
+            if not neighbour:
+                continue
+
+            # Find shortest distance to other mapped physical qubit
+            shortest_distance = num_physical_qubits
+            for i in mapped_physical_qubits:       
+                if i == mpq:
+                    continue
+                if topo.dist(i,nmpq) < shortest_distance:
+                    shortest_distance = topo.dist(i,nmpq)
+
+            # count connection to non-mapped physical qubits
+            free_degree = 0
+            for i in range(num_physical_qubits):  
+                if topo.dist(nmpq,i) == 1 and i not in mapped_physical_qubits:
+                    free_degree += 1
+
+            if shortest_distance < min_2nd_distance:
+                min_2nd_distance = shortest_distance
+                npq = [nmpq]
+                max_free_degree = free_degree
+            elif shortest_distance == min_2nd_distance and free_degree > max_free_degree:
+                min_2nd_distance = shortest_distance
+                npq = [nmpq]
+                max_free_degree = free_degree
+            elif shortest_distance == min_2nd_distance and free_degree == max_free_degree:
+                npq.append(nmpq)
+
+        # select logical qubit having max sum score with neighbouring mapped logical qubits
         max_correlation = -1
         max_logical_qubit = -1
         max_physical_qubit = -1
@@ -395,28 +389,33 @@ def map_graphs_from_center(correlations, pp, tm):
                     continue
                 correlation_sum = 0
                 for mpq in mapped_physical_qubits:
+                    if topo.dist(mpq, nmpq) != 1:
+                        continue
                     mlq = mapping_reverse[mpq]
                     correlation_sum += correlations[nmlq, mlq] 
                 if max_correlation == -1 or correlation_sum > max_correlation:
                     max_correlation = correlation_sum
                     max_logical_qubit = nmlq
                     max_physical_qubit = nmpq
-#        print(max_logical_qubit, max_physical_qubit, max_correlation)
+
+        # Make mapping
         mapped_logical_qubits.append(max_logical_qubit)
         mapped_physical_qubits.append(max_physical_qubit)
         mapping[max_logical_qubit] = max_physical_qubit
         mapping_reverse[max_physical_qubit] = max_logical_qubit
     return mapping
 
-def center_physical_qubit(tm, apsp):
+def center_physical_qubit(topo):
     # Find group of qubits having maximum degree, and degree of 1
+    num_physical_qubits = topo.num_qubits
+
     max_degree = 0
     max_degree_qubits = []
     one_degree_qubits = []
-    for i in range(len(tm)):
+    for i in range(num_physical_qubits):
         degree = 0
-        for j in range(len(tm)):
-            if i != j and tm[i,j] == 1:
+        for j in range(num_physical_qubits):
+            if i != j and topo.dist(i,j) == 1:
                 degree += 1
         if degree > max_degree:
             max_degree = degree
@@ -435,7 +434,7 @@ def center_physical_qubit(tm, apsp):
     for q1 in max_degree_qubits:
         min_distance_to_edge = -1
         for q2 in one_degree_qubits:
-            dist = apsp[q1, q2]
+            dist = topo.dist(q1, q2)
             if min_distance_to_edge == -1 or dist < min_distance_to_edge:
                 min_distance_to_edge = dist
         if min_distance_to_edge > max_distance_to_edge:
@@ -664,14 +663,3 @@ def random_sample(first, last):
     random.shuffle(arr)
     return arr
 
-
-def floydWarshall(graph):
-    g = graph.copy()
-    n = len(g)
-
-    for k in range(n):
-        for i in range(n):
-            for j in range(n):
-                if ((g[i][j] == 0 or g[i][j] > (g[i][k] + g[k][j])) and (g[k][j] != 0 and g[i][k] != 0)):
-                    g[i][j] = g[i][k] + g[k][j]
-    return g

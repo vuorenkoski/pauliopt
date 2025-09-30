@@ -23,6 +23,17 @@ def permute_with_mapping(mapping, pp, num_physical_qubits):
         permuted_pp.pauli_gadgets.append(gadget_p)
     return permuted_pp
 
+def qubit_graph(mapping, topo):
+    """Create a qubit map from the mapping and topology which includes only used qubits"""
+    num_logical_qubits = len(mapping)
+    edges = []
+    for i in range(num_logical_qubits-1):
+        for j in range(i,num_logical_qubits):
+            if topo.dist(mapping[i], mapping[j]) == 1:
+                edges.append((i,j))
+    new_topo = Topology(num_logical_qubits, edges)
+    return new_topo
+
 def extend_gadgets(pp, topo):
     """Extend the PauliPolynomial gadgets to match the topology"""
     if pp.num_qubits == topo.num_qubits:
@@ -377,3 +388,40 @@ def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
         elif pauligraph_degrees[gadget_index, i] > 0:
             steiner_nodes += 1
     return steiner_nodes, nodes
+
+
+brisbane = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,-1,
+14,-1,-1,-1,15,-1,-1,-1,16,-1,-1,-1,17,-1,-1,
+18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,
+-1,-1,33,-1,-1,-1,34,-1,-1,-1,35,-1,-1,-1,36,
+37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,
+52,-1,-1,-1,53,-1,-1,-1,54,-1,-1,-1,55,-1,-1,
+56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,
+-1,-1,71,-1,-1,-1,72,-1,-1,-1,73,-1,-1,-1,74,
+75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,
+90,-1,-1,-1,91,-1,-1,-1,92,-1,-1,-1,93,-1,-1,
+94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,
+-1,-1,109,-1,-1,-1,110,-1,-1,-1,111,-1,-1,-1,112,
+-1,113,114,115,116,117,118,119,120,121,122,123,124,125,126]
+
+def print_brisbane_mapping(mapping):
+    for i in range(13):
+        for j in range(15):
+            if brisbane[i*15+j] != -1:
+                if brisbane[i*15+j] in mapping:
+                    print('X', end='')
+                else:
+                    print('+', end='')
+            else:
+                print(' ', end='')
+        print()
+    print()
+
+def print_brisbane_topo():
+    for i in range(13):
+        for j in range(15):
+            if brisbane[i*15+j] != -1:
+                print('O', end='')
+            else:
+                print(' ', end='')
+        print()

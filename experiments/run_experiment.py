@@ -10,7 +10,8 @@ from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynom
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth
 from experiments.utils import create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
-from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth
+from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth, qubit_graph
+from experiments.utils import print_brisbane_mapping, print_brisbane_topo
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
@@ -27,6 +28,7 @@ def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=N
     if logical_qubits > backend['qubits']:
         raise ValueError('Logical qubits cannot be more than physical qubits')
     print('----------------------------------Experiment')
+    print('mapping versus trivial', trivial_mapping)
     print('Backend:', backend['name'])
     print('Num physical qubits:',  backend['qubits'])
     print('Num logical qubits:',  logical_qubits)
@@ -34,7 +36,9 @@ def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=N
     print('Mapping method:', mapping_method.__name__)
     print('Synthesis methods:', [m.__name__ for m in methods])
     print('Verifying:', verify)
-    df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','time','pre-cx'])
+    print('trivial mapping')
+ #   print_brisbane_mapping(trivial_mapping)
+    df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','cx_depth','time','pre-cx'])
     if not steps:
         steps = list(range(nr_steps, nr_gadgets, nr_steps))
     for num_gadgets in steps:
@@ -47,16 +51,19 @@ def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=N
             pp = simplify_pauli_polynomial(pp, allow_acs=True)
             mapping_time = time.time()
             map = mapping_method(pp, topo)
-#            print(qubit_order(map, physical_qubits=backend['qubits']))
+            print_brisbane_mapping(map)
             mapping_time = int((time.time() - mapping_time) * 1000)
-            pp_m = permute_with_mapping(map, pp, topo.num_qubits)
-            pp_r = permute_with_mapping(trivial_mapping, pp, topo.num_qubits)
+#            print(mapping_time)
+            topo_t = qubit_graph(trivial_mapping, topo)
+            topo_m = qubit_graph(map, topo)
+#            pp_m = permute_with_mapping(map, pp, topo.num_qubits)
+#            pp_r = permute_with_mapping(trivial_mapping, pp, topo.num_qubits)
 
             for synth_method in methods:
                 start = time.time()
-                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo)
+                circ_out, gadget_perm, perm, benchmarks = synth_method(pp.copy(), topo_m)
                 if verify:
-                    correct = check_circuit_equivalence(pp_m.copy(), circ_out, gadget_perm, perm)
+                    correct = check_circuit_equivalence(pp.copy(), circ_out, gadget_perm, perm)
                     if not correct:
                         print('Circuit equivalence failed for', synth_method.__name__, 'with algorithm mapping', mapping_method.__name__)
                         input()
@@ -67,12 +74,13 @@ def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=N
                             'method': synth_method.__name__,
                             'mapping': 'algorithm',
                             'cx': cnot_count(circ_out),
+                            'cx_depth': cnot_depth(circ_out),
                         } | benchmarks | {'time': mapping_time + int((time.time()-start) * 1000)}
                 df.loc[len(df)] = column
                 start = time.time()
-                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo)
+                circ_out, gadget_perm, perm, benchmarks = synth_method(pp.copy(), topo_t)
                 if verify:
-                    correct = check_circuit_equivalence(pp_r.copy(), circ_out, gadget_perm, perm)
+                    correct = check_circuit_equivalence(pp.copy(), circ_out, gadget_perm, perm)
                     if not correct:
                         print('Circuit equivalence failed for', synth_method.__name__, 'with random mapping', mapping_method.__name__)
                         input()
@@ -83,6 +91,7 @@ def trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=N
                             'method': synth_method.__name__,
                             'mapping': 'random',
                             'cx': cnot_count(circ_out),
+                            'cx_depth': cnot_depth(circ_out),
                         } | benchmarks | {'time': int((time.time()-start) * 1000)}
                 df.loc[len(df)] = column
         df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
@@ -104,6 +113,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
     if logical_qubits > backend['qubits']:
         raise ValueError('Logical qubits cannot be more than physical qubits')
     print('----------------------------------Experiment')
+    print('mapping versus random')
     print('Backend:', backend['name'])
     print('Num physical qubits:',  backend['qubits'])
     print('Num logical qubits:',  logical_qubits)
@@ -337,21 +347,25 @@ if __name__ == "__main__":
 #    mapping_method = pauli_forest_mapping
 #    mapping_method = I_to_edge
     random.seed(42)
-    steps = list(range(2, 40, 2)) + list(range(40, 220, 20))
+#    steps = list(range(2, 40, 2)) + list(range(40, 220, 20))
 #    steps = list(range(200, 1000, 50))
-#    steps = list(range(20, 220, 20))
+    steps = list(range(20, 220, 20))
 #    steps = [320]
 #    backend = {'name': 'quito', 'qubits': 5}
-#    backend = {'name': 'guadalupe', 'qubits': 16}
-#    backend = {'name': 'grid', 'qubits': 9}
+    backend = {'name': 'guadalupe', 'qubits': 16}
+#    backend = {'name': 'grid', 'qubits': 16}
     backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'cycle', 'qubits': 10}
-    trivial_mapping = [6,7,8,11,12,13]
-    logical_qubits = 6
+    backend = {'name': 'brisbane', 'qubits': 127}
+#    trivial_mapping = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    logical_qubits = 32
+    trivial_mapping = list(range(logical_qubits))
     max_legs = None
-#    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, 
-                            allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+    
+    print_brisbane_topo()
+    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=200, 
+#                            allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
     input()
 
     seed = 42
