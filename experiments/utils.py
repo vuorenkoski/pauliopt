@@ -23,7 +23,7 @@ def permute_with_mapping(mapping, pp, num_physical_qubits):
         permuted_pp.pauli_gadgets.append(gadget_p)
     return permuted_pp
 
-def qubit_graph(mapping, topo):
+def map_topology(mapping, topo):
     """Create a qubit map from the mapping and topology which includes only used qubits"""
     num_logical_qubits = len(mapping)
     edges = []
@@ -33,6 +33,21 @@ def qubit_graph(mapping, topo):
                 edges.append((i,j))
     new_topo = Topology(num_logical_qubits, edges)
     return new_topo
+
+def map_tree(mapping, tree):
+    root, tree_childrens = tree
+    reverse_mapping = {}
+    for lq,pq in enumerate(mapping):
+        reverse_mapping[pq] = lq
+    new_root = reverse_mapping[root]
+    new_childrens = {}
+    for lq,pq in enumerate(mapping):
+        children = tree_childrens[pq]
+        if children is None:
+            new_childrens[lq] = None
+        else:
+            new_childrens[lq] = [reverse_mapping[pq] for pq in children]
+    return new_root, new_childrens
 
 def extend_gadgets(pp, topo):
     """Extend the PauliPolynomial gadgets to match the topology"""
@@ -195,10 +210,10 @@ def aggregate_data(df, method1, method2):
     df3 = df3.merge(df_1, on=['n_gadgets'], how='left')
     df3 = df3.merge(df_1m, on=['n_gadgets'], how='left')
     df3['sg-sgm%'] = np.round(((df3['sg+mapping'] / df3['sg']) - 1)*100,1)
-    df3['sg-do%'] = np.round(((df3['do'] / df3['sg']) - 1)*100,1)
     df3['do-dom%'] = np.round(((df3['do+mapping'] / df3['do']) - 1)*100,1)
-    df3['sg-dom%'] = np.round(((df3['do+mapping'] / df3['sg']) - 1)*100,1)
-    df3['sg-do time%'] = np.round(((df3['do (ms)'] / df3['sg (ms)']) - 1)*100,1)
+    df3['sg-do%'] = np.round(((df3['do'] / df3['sg']) - 1)*100,1)
+    df3['sgm-dom%'] = np.round(((df3['do+mapping'] / df3['sg+mapping']) - 1)*100,1)
+    df3['sgm-dom time%'] = np.round(((df3['dom (ms)'] / df3['sgm (ms)']) - 1)*100,1)
     df3 = df3.rename(columns={'n_gadgets': 'gadgets'})
     df3 = df3.set_index('gadgets')
     return df3
@@ -213,9 +228,10 @@ def aggregate_data_depth(df, method1, method2):
     df3 = df3.merge(df_1, on=['n_gadgets'], how='left')
     df3 = df3.merge(df_1m, on=['n_gadgets'], how='left')
     df3['sg-sgm%'] = np.round(((df3['sg+mapping'] / df3['sg']) - 1)*100,1)
-    df3['sg-do%'] = np.round(((df3['do'] / df3['sg']) - 1)*100,1)
     df3['do-dom%'] = np.round(((df3['do+mapping'] / df3['do']) - 1)*100,1)
-    df3['sg-do time%'] = np.round(((df3['do (ms)'] / df3['sg (ms)']) - 1)*100,1)
+    df3['sg-do%'] = np.round(((df3['do'] / df3['sg']) - 1)*100,1)
+    df3['sgm-dom%'] = np.round(((df3['do+mapping'] / df3['sg+mapping']) - 1)*100,1)
+    df3['sgm-dom time%'] = np.round(((df3['dom (ms)'] / df3['sgm (ms)']) - 1)*100,1)
     df3 = df3.rename(columns={'n_gadgets': 'gadgets'})
     df3 = df3.set_index('gadgets')
     return df3
@@ -404,10 +420,12 @@ brisbane = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,-1,
 -1,-1,109,-1,-1,-1,110,-1,-1,-1,111,-1,-1,-1,112,
 -1,113,114,115,116,117,118,119,120,121,122,123,124,125,126]
 
-def print_brisbane_mapping(mapping):
+def print_brisbane_mapping(mapping, root):
     for i in range(13):
         for j in range(15):
-            if brisbane[i*15+j] != -1:
+            if root is not None and brisbane[i*15+j] == root:
+                print('O', end='')
+            elif brisbane[i*15+j] != -1:
                 if brisbane[i*15+j] in mapping:
                     print('X', end='')
                 else:
