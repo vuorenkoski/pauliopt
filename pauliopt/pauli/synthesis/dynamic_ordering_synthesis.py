@@ -28,7 +28,7 @@ from tests.pauli.utils import verify_equality
 # we have to process m gadgets and n qubits, so n*m
 # Each opearation takes 9*m*x time
 
-def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, print_order=None, debug=False, random_sel=False):
+def pauli_polynomial_dynamic_ordering(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
     num_gadgets = len(pp.pauli_gadgets)
     removed_gadgets_num = 0
