@@ -72,6 +72,13 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     general_data = (gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge)
     circ_data = (qc_out, qc_prop)
 
+    if tree is not None:
+        node_levels = dict()
+        root, tree_children = tree
+        node_levels_from_tree(tree_children, root, node_levels)
+    else:
+        node_levels = None
+
     debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
 
@@ -80,7 +87,10 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     debug and print_sorted_gd(gadget_data, order=print_order)
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
-        next = next_gadget(general_data)
+        if tree is None:
+            next = next_gadget(general_data)
+        else:
+            next = next_gadget2(general_data, node_levels)
         debug and print('-------Next gadget:', next)
         num_legs = 0
         for j in range(num_qubits):
@@ -88,6 +98,9 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
                 num_legs += 1
         if num_legs == 0:
             print('ERROR: qubit map has no nodes')
+            print('gadget:', next)
+            print_sorted_gd(gadget_data)
+            print(perm_gadgets)
             input()
         
         # Loop going through qubits in gadget, removing them one by one
@@ -237,7 +250,7 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
                 if pauli1 == 0b00:
                     snode_gates = gates0 & gate_combinations[(legs,False,False)]
                     snode_change = +1
-                else:
+                else: #both qubit are non-I
                     node_gates = gates0 & gate_combinations[(legs,True,False)]
                     node_change = 1
                     snode_gates = gates0 & gate_combinations[(legs,False,True)]
@@ -314,6 +327,46 @@ def next_gadget(general_data):
             distance = dist
             closest = i
     return closest
+
+def next_gadget2(general_data, node_levels):
+    """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
+    gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
+    num_qubits, num_gadgets = gadget_data.shape
+    closest = -1
+    min_level = num_qubits
+    distance = -1
+    for i in range(num_gadgets):
+        if removed_gadgets[i]:
+            continue
+        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
+#        level = get_gadget_level(node_levels, pauligraph_degrees, i)
+        dist = nodes + (s_nodes * 2)
+        if distance == -1 or dist < distance:
+            distance = dist
+            closest = i
+#        elif dist == distance and level < min_level:
+#            min_level = level
+#            closest = i
+    return closest
+
+def get_gadget_level(node_levels, pauligraph_degrees, gadget_index):
+    max_level = 0
+    for i in range(pauligraph_degrees.shape[1]):
+        if pauligraph_degrees[gadget_index,i] > 0:
+            max_level = max(max_level, node_levels[i])
+    return max_level
+
+def node_levels_from_tree(tree_children, node, node_levels):
+    if tree_children[node] is None:
+        node_levels[node] = 0
+        return 0
+    max_level = 0
+    for n in tree_children[node]:
+        level = node_levels_from_tree(tree_children, n, node_levels)
+        if level>max_level:
+            max_level = level
+    node_levels[node] = max_level + 1
+    return max_level + 1
 
 
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo):
@@ -528,13 +581,23 @@ def remove_connection(general_data, gadget_index, qubit1, qubit2):
     pauligraph_degrees[gadget_index,qubit2] -= 1
 
 
+def steiner_tree(gadget_data,topo, gadget_index):
+    """ Uses NetworkX Steinertree algorithm to make steinertree from gadget."""
+    num_qubits, num_gadgets = gadget_data.shape
+    nodes = []
+    for i in range(num_qubits):
+        if gadget_data[i,gadget_index] != 0b00:
+            nodes.append(i)
+    steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
+    return nx.Graph(steiner_stree)
+
 def mapping_tree(gadget_data, topo, tree, gadget_index):
     num_qubits, num_gadgets = gadget_data.shape
     root, tree_children = tree
     nodes_removed = []
     edges = []
-    remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed, edges)
-    remove_nodes_from_root_next(gadget_data, gadget_index, tree_children, root, nodes_removed,edges)
+    remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_removed, edges)
+    remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed,edges)
     collect_edges(tree_children, root, nodes_removed, edges)
 
     G = nx.Graph(edges)
@@ -547,16 +610,6 @@ def mapping_tree(gadget_data, topo, tree, gadget_index):
 
     return G
 
-def steiner_tree(gadget_data,topo, gadget_index):
-    """ Uses NetworkX Steinertree algorithm to make steinertree from gadget."""
-    num_qubits, num_gadgets = gadget_data.shape
-    nodes = []
-    for i in range(num_qubits):
-        if gadget_data[i,gadget_index] != 0b00:
-            nodes.append(i)
-    steiner_stree = nx.algorithms.approximation.steinertree.steiner_tree(topo.to_nx, nodes)
-    return nx.Graph(steiner_stree)
-
 def collect_edges(tree_children, root, nodes_removed, edges):
     if tree_children[root] is None:
         return
@@ -566,7 +619,7 @@ def collect_edges(tree_children, root, nodes_removed, edges):
                 edges.append((root, node))
         collect_edges(tree_children, node, nodes_removed, edges)
 
-def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
+def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
     if tree_children[root] is None:
         if gadget_data[root,gadget_index] == 0b00:
             nodes_removed.append(root)
@@ -575,7 +628,7 @@ def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes
             return False
     non_removable_branches = 0
     for node in tree_children[root]:
-        removable = remove_nodes_from_root(gadget_data, gadget_index, tree_children, node, nodes_removed, edges)
+        removable = remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, node, nodes_removed, edges)
         if not removable:
             non_removable_branches += 1
     if non_removable_branches == 0 and gadget_data[root,gadget_index] == 0b00:
@@ -583,18 +636,20 @@ def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes
         return True 
     return False
 
-def remove_nodes_from_root_next(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
+def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
     if tree_children[root] is None:
         return
     if gadget_data[root,gadget_index] != 0b00:
         return
-    branches_left = []
+    branches_left = 0
+    branch = -1
     for node in tree_children[root]:
         if node not in nodes_removed:
-            branches_left.append(node)
-    if len(branches_left) == 1:
+            branches_left += 1
+            branch = node
+    if branches_left == 1:
         nodes_removed.append(root)
-        remove_nodes_from_root_next(gadget_data, gadget_index, tree_children, branches_left[0], nodes_removed, edges)
+        remove_nodes_from_root(gadget_data, gadget_index, tree_children, branch, nodes_removed, edges)
 
 def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
     """ Defines number of steiner nodes and regular nodes of steiner tree (pauligraph data)"""
