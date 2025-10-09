@@ -13,7 +13,6 @@ from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth
 from experiments.utils import create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
 from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth
-from experiments.utils import print_brisbane_mapping, print_brisbane_topo
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
