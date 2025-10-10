@@ -87,10 +87,10 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     debug and print_sorted_gd(gadget_data, order=print_order)
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
-        if tree is None:
-            next = next_gadget(general_data)
-        else:
-            next = next_gadget2(general_data, node_levels)
+#        if tree is None:
+        next = next_gadget(general_data, gate_combinations)
+#        else:
+#            next = next_gadget2(general_data, node_levels)
         debug and print('-------Next gadget:', next)
         num_legs = 0
         for j in range(num_qubits):
@@ -106,7 +106,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
         # Loop going through qubits in gadget, removing them one by one
         while num_legs > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
-            edge, gates = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
+            edge, gates, score = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo)
             removed_gadgets_num += rgadgets
@@ -215,7 +215,7 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
             edge_gates.append(options)
 
     if num_gadgets - removed_gadgets_num == 1: # Only one gadget left, choose any
-        return edge_options[0], get_gates(edge_gates[0])[0]
+        return edge_options[0], get_gates(edge_gates[0])[0], 0
 
     score = np.zeros((len(edge_options),9), dtype=int)
     snode_score = np.zeros((len(edge_options),9), dtype=int)
@@ -309,14 +309,14 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
         edge_gates = random.choice(best_options)
     else:
         edge_gates = option_possibilities[0]
-    return edge_options[edge_gates[0]], get_gate(1<<edge_gates[1])
+    return edge_options[edge_gates[0]], get_gate(1<<edge_gates[1]), edge_gates[2]
 
 
-def next_gadget(general_data):
+def next_gadget(general_data, gate_combinations):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
-    closest = -1
+    closest = []
     distance = num_qubits*2
     for i in range(num_gadgets):
         if removed_gadgets[i]:
@@ -325,8 +325,24 @@ def next_gadget(general_data):
         dist = nodes + (s_nodes * 2)
         if dist < distance:
             distance = dist
-            closest = i
-    return closest
+            closest = [i]
+        elif dist == distance:
+            closest.append(i)
+
+    max_score = - num_gadgets*2
+    max_gadget = -1
+    for gadget in closest:
+        edge, gates, score = next_edge_to_remove(gadget, general_data, gate_combinations, 0)
+
+        if score > max_score:
+            max_score = score
+            max_gadget = gadget
+    if max_gadget == -1:
+        print('ERROR: no gadget found')
+        print('closest:', closest)
+        print_sorted_gd(gadget_data)
+        input()
+    return max_gadget   
 
 def next_gadget2(general_data, node_levels):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
