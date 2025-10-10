@@ -316,6 +316,23 @@ def next_gadget(general_data, gate_combinations):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
+    closest = -1
+    distance = num_qubits*2
+    for i in range(num_gadgets):
+        if removed_gadgets[i]:
+            continue
+        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
+        dist = nodes + (s_nodes * 2)
+        if dist < distance:
+            distance = dist
+            closest = i
+
+    return closest
+
+def next_gadget_efficient_removal(general_data, gate_combinations):
+    """ Check all closest gadgets, which one most shortens gadgets. Takes more time, littlebbit more efficient"""
+    gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
+    num_qubits, num_gadgets = gadget_data.shape
     closest = []
     distance = num_qubits*2
     for i in range(num_gadgets):
