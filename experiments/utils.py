@@ -35,6 +35,8 @@ def map_topology(mapping, topo):
     return new_topo
 
 def map_tree(mapping, tree):
+    if tree is None:
+        return None
     root, tree_childrens = tree
     reverse_mapping = {}
     for lq,pq in enumerate(mapping):
@@ -420,19 +422,37 @@ brisbane = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,-1,
 -1,-1,109,-1,-1,-1,110,-1,-1,-1,111,-1,-1,-1,112,
 -1,113,114,115,116,117,118,119,120,121,122,123,124,125,126]
 
-def print_brisbane_mapping(mapping, root):
-    for i in range(13):
-        for j in range(15):
-            if root is not None and brisbane[i*15+j] == root:
-                print('O', end='')
-            elif brisbane[i*15+j] != -1:
-                if brisbane[i*15+j] in mapping:
+def print_brisbane_mapping(mapping, tree):
+    if tree is not None:
+        root, tree_children = tree
+        for i in range(13):
+            for j in range(15):
+                if root is not None and brisbane[i*15+j] == root:
                     print('X', end='')
+                elif brisbane[i*15+j] != -1:
+                    if brisbane[i*15+j] in mapping:
+                        if tree_children[brisbane[i*15+j]] is None:
+                            print('o', end='')
+                        elif len(tree_children[brisbane[i*15+j]]) > 1:
+                            print('+', end='')
+                        elif len(tree_children[brisbane[i*15+j]]) == 1:
+                            print('*', end='')
+                    else:
+                        print('.', end='')
                 else:
-                    print('+', end='')
-            else:
-                print(' ', end='')
-        print()
+                    print(' ', end='')
+            print()
+    else:
+        for i in range(13):
+            for j in range(15):
+                if brisbane[i*15+j] != -1:
+                    if brisbane[i*15+j] in mapping:
+                        print('O', end='')
+                    else:
+                        print('+', end='')
+                else:
+                    print(' ', end='')
+            print()
     print()
 
 def print_brisbane_topo():

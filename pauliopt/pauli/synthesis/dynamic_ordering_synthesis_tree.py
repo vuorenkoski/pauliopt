@@ -39,6 +39,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     perm_gadgets = []
 
     # Create datastructures
+    last_leg = np.zeros((num_qubits), dtype=int) # Last leg in each qubit
     gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Dynamic matrix representing paulis
     pauligraph = np.zeros((num_gadgets,num_qubits,num_qubits), dtype=np.int8) # Dynamic matrix represnting steiner trees
     pauligraph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Dynamic matrix represnting degrees of node in steiner trees
@@ -83,12 +84,12 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     debug and print_sorted_gd(gadget_data, order=print_order)
 
     # Main loop going through gadgets starting from smallest
-    removed_gadgets_num += check_for_singles(general_data, circ_data, perm_gadgets)
+    removed_gadgets_num += check_for_singles(general_data, circ_data, perm_gadgets, last_leg)
     debug and print_sorted_gd(gadget_data, order=print_order)
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
 #        if tree is None:
-        next = next_gadget(general_data, gate_combinations)
+        next = next_gadget(general_data)
 #        else:
 #            next = next_gadget2(general_data, node_levels)
         debug and print('-------Next gadget:', next)
@@ -108,7 +109,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
             edge, gates, score = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
             debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
-            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo)
+            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg)
             removed_gadgets_num += rgadgets
             if gadget_data[edge[0], next] == 0b00:
                 num_legs -= 1
@@ -131,7 +132,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
         if isinstance(gate, CX):
             pre_cx += 1
     density = cnot_count_density(qc_out)
-    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density}
+    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density, 'last_leg': last_leg}
 
 
 def create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees, last_edge, gadget_index):
@@ -152,7 +153,7 @@ def create_pauligraph_from_tree_graph(tree_graph, pauligraph, pauligraph_degrees
         pauligraph[gadget_index, edges[1], edges[0]] = 1
 
 
-def check_for_singles(general_data, circ_data, perm_gadgets):
+def check_for_singles(general_data, circ_data, perm_gadgets, last_leg):
     """ check if there are gadgets having only single leg and remove them if so."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
@@ -169,6 +170,7 @@ def check_for_singles(general_data, circ_data, perm_gadgets):
         if x == 1:
             removed_gadgets_num += 1
             remove_single(general_data, circ_data, perm_gadgets, i, qubit)
+            last_leg[qubit] += 1
     return removed_gadgets_num
 
 
@@ -312,7 +314,7 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
     return edge_options[edge_gates[0]], get_gate(1<<edge_gates[1]), edge_gates[2]
 
 
-def next_gadget(general_data, gate_combinations):
+def next_gadget(general_data):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
@@ -326,7 +328,36 @@ def next_gadget(general_data, gate_combinations):
         if dist < distance:
             distance = dist
             closest = i
+    return closest
 
+def next_gadget_with_node_levels(general_data, node_levels):
+    """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
+    gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
+    num_qubits, num_gadgets = gadget_data.shape
+    closest = -1
+    distance = num_qubits*2
+    level = -1
+    count = []
+    for i in range(num_gadgets):
+        if removed_gadgets[i]:
+            continue
+        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
+        this_level = get_gadget_level(node_levels, pauligraph_degrees, i)
+        dist = nodes + (s_nodes * 2)
+        if dist < distance:
+            distance = dist
+            closest = i
+            level = this_level
+            count = [i]
+        elif dist == distance:
+            if this_level < level:
+                level = this_level
+                closest = i
+                count = [i]
+            elif this_level == level:
+                count.append(i)
+#    if len(count) > 1:
+#        print('count:', count)
     return closest
 
 def next_gadget_efficient_removal(general_data, gate_combinations):
@@ -348,18 +379,20 @@ def next_gadget_efficient_removal(general_data, gate_combinations):
 
     max_score = - num_gadgets*2
     max_gadget = -1
-    for gadget in closest:
-        edge, gates, score = next_edge_to_remove(gadget, general_data, gate_combinations, 0)
-
-        if score > max_score:
-            max_score = score
-            max_gadget = gadget
-    if max_gadget == -1:
-        print('ERROR: no gadget found')
-        print('closest:', closest)
-        print_sorted_gd(gadget_data)
-        input()
-    return max_gadget   
+    if len(closest) == 1:
+        return closest[0]
+    else:
+        for gadget in closest:
+            edge, gates, score = next_edge_to_remove(gadget, general_data, gate_combinations, 0)
+            if score > max_score:
+                max_score = score
+                max_gadget = gadget
+        if max_gadget == -1:
+            print('ERROR: no gadget found')
+            print('closest:', closest)
+            print_sorted_gd(gadget_data)
+            input()
+        return max_gadget   
 
 def next_gadget2(general_data, node_levels):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
@@ -402,7 +435,7 @@ def node_levels_from_tree(tree_children, node, node_levels):
     return max_level + 1
 
 
-def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, topo):
+def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg):
     """apply single qubit gates and CNOT to all non-removed gates."""
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     qc_out, qc_prop = circ_data
@@ -418,18 +451,18 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         gate1 = first_qubit
         gate2 = second_qubit
     for gate, qubit in [(gate1, qubit1), (gate2, qubit2)]:
-        if gate == apply_vdg:
+        if gate == apply_v:
             qc_out.v(qubit)
             qc_prop.append(Vdg(qubit))
-        elif gate == apply_sdg:
+        elif gate == apply_s:
             qc_out.s(qubit)
             qc_prop.append(Sdg(qubit))
-        elif gate == apply_vs:
-            qc_out.s(qubit)
-            qc_prop.append(Sdg(qubit))
-            qc_out.v(qubit)
-            qc_prop.append(Vdg(qubit))
         elif gate == apply_sv:
+            qc_out.s(qubit)
+            qc_prop.append(Sdg(qubit))
+            qc_out.v(qubit)
+            qc_prop.append(Vdg(qubit))
+        elif gate == apply_vs:
             qc_out.v(qubit)
             qc_prop.append(Vdg(qubit))
             qc_out.s(qubit)
@@ -474,8 +507,10 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         if gadget_removed:
             if pauli1 == 0b00:
                 remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit2)
+                last_leg[qubit2] += 1
             else:
                 remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit1)
+                last_leg[qubit1] += 1
             removed_gadgets_num += 1
             gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = 0b00, 0b00
 #        check_cdconns_integrity(pauligraph, pauligraph_degrees, gadget_data, last_edge)
@@ -634,12 +669,6 @@ def mapping_tree(gadget_data, topo, tree, gadget_index):
     collect_edges(tree_children, root, nodes_removed, edges)
 
     G = nx.Graph(edges)
-#        print(G.nodes, G.edges, gadget_index)
-#        print(gadget_data[:,gadget_index])
-#        print('nodes:', G.nodes)
-#        print('edges:', G.edges)
-#        print('edges:', edges)
-#        print('removed:', nodes_removed)
 
     return G
 
@@ -697,13 +726,13 @@ def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
     return steiner_nodes, nodes
 
 
-def apply_vdg(p):
+def apply_v(p):
     phase = 1
     if p == 0b10:
         phase = -1
     return (0b10 & p) | ((0b01 & p) ^ (p >> 1)), phase
 
-def apply_sdg(p):
+def apply_s(p):
     phase = 1
     if p == 0b11:
         phase = -1
@@ -712,20 +741,20 @@ def apply_sdg(p):
 def apply_I(p):
     return p, 1
 
-def apply_vs(p):
-    pauli,phase1 = apply_sdg(p)
-    pauli,phase2 = apply_vdg(pauli)
+def apply_sv(p):
+    pauli,phase1 = apply_s(p)
+    pauli,phase2 = apply_v(pauli)
     return pauli, phase1*phase2
 
-def apply_sv(p):
-    pauli,phase1 = apply_vdg(p)
-    pauli,phase2 = apply_sdg(pauli)
+def apply_vs(p):
+    pauli,phase1 = apply_v(p)
+    pauli,phase2 = apply_s(pauli)
     return pauli, phase1*phase2
 
 def apply_svs(p):
-    pauli,phase1 = apply_sdg(p)
-    pauli,phase2 = apply_vdg(pauli)
-    pauli,phase3 = apply_sdg(pauli)
+    pauli,phase1 = apply_s(p)
+    pauli,phase2 = apply_v(pauli)
+    pauli,phase3 = apply_s(pauli)
     return pauli, phase1*phase2*phase3
 
 def apply_cnot(p1, p2):
@@ -759,11 +788,11 @@ def possible_gates(paulis,target0, target1):
     :params paulis: tuple of two chars, e.g. (0b01, 0b11) or (0b00, 0b10)
     :params target0: True if qubit0 should have I, False if it should not have I
     :params target1: True if qubit1 should have I, False if it should not have I
-    :returns: 72-bit integer coding possible gate combinations."""
-    # CHANGED SO THAT IT RETURNS ONLY 36 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
-    # coding I, V, S, SVS(H), SV, VS
-    # SV X->Y, Y->Z, Z->X: first propagate S, then H
-    # VS X->Z, Z->Y, Y->X 
+    :returns: 9-bit integer coding possible gate combinations."""
+    # CHANGED SO THAT IT RETURNS ONLY 9 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
+    # Possibilities for first: I, V SV
+    # Possibilities for second: S, V, VS
+    # There is legacy code because of previous 72 possibilities
     gates_none = np.zeros((2,6,6), dtype=object)
     convert_to_X = {0b01: [0,1], 0b11: [2,5], 0b10: [3,4]}
     convert_to_Y = {0b01: [2,4], 0b11: [0,3], 0b10: [1,5]}
@@ -833,36 +862,37 @@ def possible_gates(paulis,target0, target1):
 
     options = []
 #    for i, cnot_reversed in enumerate([False, True]):
-    for j, first_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
-        for k, second_qubit in enumerate([apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]):
+    for j, first_qubit in enumerate([apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]):
+        for k, second_qubit in enumerate([apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]):
             if paulis_options[0,j,k] == 1:
                 options.append((first_qubit, second_qubit, False))
 
+    # Adapt the new 9 possibilities coding
     options2 = 0 
-    for j, first_qubit in enumerate([apply_I, apply_vdg, apply_vs]):
-        for k, second_qubit in enumerate([apply_vdg, apply_sdg, apply_sv]):
+    for j, first_qubit in enumerate([apply_I, apply_v, apply_sv]):
+        for k, second_qubit in enumerate([apply_v, apply_s, apply_vs]):
             if (first_qubit, second_qubit, False) in options:
                 options2 |= 1 << (j*3 + k)
 
     return options2
 
 def get_gates(gate_set):
-    """Return gate combinations for given gate set indicated by 72-bit integer.
-    :params gate_set: 72-bit integer coding possible gate combinations.
+    """Return gate combinations for given gate set indicated by 9-bit integer.
+    :params gate_set: 9-bit integer coding possible gate combinations.
     :returns: list of tuples (first_qubit_gate, second_qubit_gate, cnot direction).
     """
     # CHANGED SO THAT IT RETURNS ONLY 9 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
     gates = []
-    for j, first_qubit in enumerate([apply_I, apply_vdg, apply_vs]):
-        for k, second_qubit in enumerate([apply_vdg, apply_sdg, apply_sv]):
+    for j, first_qubit in enumerate([apply_I, apply_v, apply_sv]):
+        for k, second_qubit in enumerate([apply_v, apply_s, apply_vs]):
             gate = 1 << (j*3 + k)
             if gate & gate_set > 0:
                 gates.append((first_qubit, second_qubit, False))
     return gates
 
 def get_gate(gate_set):
-    first = [apply_I, apply_vdg, apply_vs]
-    second = [apply_vdg, apply_sdg, apply_sv]
+    first = [apply_I, apply_v, apply_sv]
+    second = [apply_v, apply_s, apply_vs]
     i = -1
     while gate_set > 0:
         gate_set >>= 1
@@ -895,8 +925,8 @@ def test_possible_gates():
                     options = possible_gates((p1, p2), target0, target1)
                     options_test = []
                     for cnot_reversed in [False]:
-                        for first_gate in [apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]:
-                            for second_gate in [apply_I, apply_vdg, apply_sdg, apply_svs, apply_sv, apply_vs]:
+                        for first_gate in [apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]:
+                            for second_gate in [apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]:
                                 if first_gate is not None:
                                     pauli1, phase = first_gate(p1)
                                 else:
@@ -967,12 +997,12 @@ def check_equal_gates():
     print('Check equal gates')
     found = False
     count = 0
-    for op11 in [apply_I, apply_vdg, apply_vs]:
-        for op12 in [apply_vdg, apply_sdg, apply_sv]:
+    for op11 in [apply_I, apply_v, apply_sv]:
+        for op12 in [apply_v, apply_s, apply_vs]:
             for cnotr1 in [False]:
                 combination = []
-                for op21 in [apply_I, apply_vdg, apply_vs]:
-                    for op22 in [apply_vdg, apply_sdg, apply_sv]:
+                for op21 in [apply_I, apply_v, apply_sv]:
+                    for op22 in [apply_v, apply_s, apply_vs]:
                         for cnotr2 in [False]:
                             if op11 == op21 and op12 == op22 and cnotr1 == cnotr2:
                                 continue

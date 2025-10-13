@@ -150,7 +150,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                 start = time.time()
                 circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo, tree)
                 if verify:
-                    correct = check_circuit_equivalence(pp.copy(), circ_out, gadget_perm, perm)
+                    correct = check_circuit_equivalence(pp_m.copy(), circ_out, gadget_perm, perm)
                     if not correct:
                         print('Circuit equivalence failed for', synth_method.__name__, 'with algorithm mapping', mapping_method.__name__)
                         input()
@@ -164,10 +164,11 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                             'cx_depth': cnot_depth(circ_out),
                         } | benchmarks | {'time': mapping_time + int((time.time()-start) * 1000)}
                 df.loc[len(df)] = column
+                
                 start = time.time()
                 circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo, tree)
                 if verify:
-                    correct = check_circuit_equivalence(pp.copy(), circ_out, gadget_perm, perm)
+                    correct = check_circuit_equivalence(pp_r.copy(), circ_out, gadget_perm, perm)
                     if not correct:
                         print('Circuit equivalence failed for', synth_method.__name__, 'with random mapping', mapping_method.__name__)
                         input()
@@ -215,20 +216,22 @@ def all_mappings(pp, backend, synth_method=pauli_polynomial_steiner_gray_cliffor
     max_cx_mapping = None
 
     output_csv = f'all_mappings_{backend['name']}_{pp.num_qubits}.csv'
-    df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','cx_depth', 'pre-cx','broken_chains','steiner_nodes','I-index','doubles','q-corr'])
+    df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','last_leg','cx','cx_depth', 'pre-cx','broken_chains','steiner_nodes','I-index','doubles','q-corr'])
+    mapping, tree = pauli_tree_mapping(pp, topo)
 
     for m in itertools.permutations(list(range(backend['qubits']))):
         verbose and sys.stdout.write(str(m[0]))
         verbose and sys.stdout.flush()
         pp_m = permute_with_mapping(m, pp, topo.num_qubits)
         
-        circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo)
+        circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo, tree)
         steiner_nodes, broken_chains, doubles, steiner_nodesx, steiner_nodesz = steiner_tree_analysis(pp_m, topo)
         column = {
                     'num_qubits': topo.num_qubits,
                     'n_gadgets': pp.num_gadgets,
                     'method': synth_method.__name__,
                     'mapping': qubit_order(m),
+                    'last_leg': benchmarks.get('last_leg', None),
                     'cx': cnot_count(circ_out),
                     'broken_chains': broken_chains,
                     'steiner_nodes': steiner_nodes,
@@ -333,7 +336,7 @@ def test_random_gadget_ordering(pp, backend, mapping, tree,synth_method, rounds=
         ppn = reorder_gadgets(pp, gadget_order)
 #        print(ppn.pauli_gadgets)
 #        input()
-        circ_out, gadget_perm, perm, benchmarks = synth_method(ppn, topo_m, tree_m)
+        circ_out, gadget_perm, perm, benchmarks = synth_method(ppn, topo, tree)
         if min_cx == -1 or benchmarks['pre-cx'] < min_cx:
             min_cx = benchmarks['pre-cx']
             min_gadget_order = gadget_order
@@ -357,7 +360,7 @@ def test_random_gadget_ordering(pp, backend, mapping, tree,synth_method, rounds=
 
 if __name__ == "__main__":
     methods = [pauli_polynomial_dynamic_ordering_tree, pauli_polynomial_steiner_gray_clifford]
-    verify = False
+    verify = True
     mapping_method = pauli_tree_mapping
 #    mapping_method = I_index_mapping
     random.seed(42)
@@ -365,7 +368,6 @@ if __name__ == "__main__":
 #    steps = list(range(200, 1000, 50))
 #    steps = list(range(20, 220, 20))
 #    steps = list(range(20, 220, 20)) + list(range(200, 2000, 100))
-#    steps = [320]
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
     backend = {'name': 'grid', 'qubits': 9}
@@ -385,32 +387,38 @@ if __name__ == "__main__":
                            allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
     input()
 
+
+    #
+    # Testing single pauli polynomial
+    #
     seed = 42
-    gadgets = 40
+    random.seed(seed)
+    gadgets = 80
     backend = {'name': 'line', 'qubits': 6}
-    backend = {'name': 'grid', 'qubits': 9}
-    backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 16
+#    backend = {'name': 'grid', 'qubits': 9}
+#    backend = {'name': 'brisbane', 'qubits': 127}
+    logical_qubits = 6
     random.seed(seed)
     pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0, allowed_legs=[Z,X,Y])
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
     print('native paulis')
     print('gadgets after simplification:', len(pp.pauli_gadgets))
     print_pp(pp)
-#    pp = reorder_gadgets(pp, [22, 54, 34, 11, 25, 23, 38, 59, 69, 5, 36, 40, 12, 45, 13, 10, 17, 18, 58, 8, 53, 20, 31, 44, 46, 47, 65, 39, 3, 1, 16, 60, 14, 6, 37, 49, 57, 42, 26, 28, 15, 68, 48, 4, 0, 27, 35, 9, 51, 55, 2, 43, 66, 62, 24, 41, 19, 50, 63, 70, 30, 56, 52, 61, 67, 29, 21, 7, 32, 33, 64])
-
 
     topo = get_topo(backend['name'], backend['qubits'])
     synth_method = pauli_polynomial_dynamic_ordering_tree
 #    synth_method = pauli_polynomial_steiner_gray_clifford
 #    mapping = mapping_method(pp, topo)
     mapping, tree = pauli_tree_mapping(pp, topo)
+    print('algorithm mapping', qubit_order(mapping))
     print('tree', tree)
-#    mapping = get_mapping_from_order([5, 2, 1, 4, 0, 3]) # bad, but few steiner nodes
-#    mapping = get_mapping_from_order([0, 1, 3, 4, 5, 2]) # good, with same steiner nodes as above
+    mapping = get_mapping_from_order([4, 3, 2, 0, 1, 5]) # best with 80,42: pre-cx 96
+#    mapping = get_mapping_from_order(2, 3, 0, 5, 1, 4) # pre-cx 138
+    print('used mapping', qubit_order(mapping))
+
+#    mapping = get_mapping_from_order([4, 3, 2, 0, 1, 5]) # good, with same steiner nodes as above
 #    mapping = get_mapping_from_order([1, 2, 0, 4, 3, 5]) # best with 80,42
 #    mapping = get_mapping_from_order([0, 1, 2, 3, 4, 5]) 
-#    mapping = get_mapping_from_order([4, 1, 0, 3, 5, 2]) # worst with 80,42
 #    print('mapping algorithm order', qubit_order(mapping))
 #    test_randomness(pp, backend, mapping, synth_method, rounds=10000)
 
@@ -420,39 +428,32 @@ if __name__ == "__main__":
 #    print('testing max_cx randomness')
 #    mean_max = test_random_gadget_ordering(pp, backend, max_cx_mapping, synth_method, rounds=1000)
 #    input()
-#    test_random_gadget_ordering(pp, backend, mapping, tree, synth_method, rounds=1000)
+#    test_random_gadget_ordering(pp, backend, mapping, tree, synth_method, rounds=10000)
 #    input()
-
-#    for x in [[1, 2, 5, 4, 0, 3], [3, 0, 5, 2, 4, 1],[0, 5, 4, 3, 2, 1],[3, 4, 0, 5, 2, 1],[0, 5, 2, 3, 4, 1],[3, 4, 0, 2, 5, 1],[3, 4, 5, 0, 2, 1],[1, 4, 2, 5, 0, 3],[1, 5, 4, 3, 2, 0],[0, 5, 3, 1, 4, 2],[0, 3, 5, 4, 1, 2],[0, 3, 4, 5, 2, 1],[4, 0, 3, 5, 2, 1],[3, 5, 2, 0, 4, 1],[2, 1, 5, 4, 0, 3],[1, 3, 5, 4, 2, 0],[0, 3, 5, 2, 4, 1],[2, 0, 4, 3, 1, 5],[4, 1, 0, 5, 2, 3],[3, 5, 2, 0, 1, 4],[4, 3, 5, 0, 2, 1],[1, 4, 2, 3, 0, 5],[5, 1, 3, 4, 0, 2],[3, 4, 5, 2, 0, 1],[2, 1, 4, 3, 5, 0]]:
-#        test_randomness(pp, backend, get_mapping_from_order(x), synth_method, rounds=1000)
-#    input()
+#    pp = reorder_gadgets(pp, [45, 10, 36, 4, 66, 34, 41, 43, 69, 27, 29, 32, 15, 50, 1, 16, 20, 61, 33, 55, 64, 35, 51, 26, 54, 46, 62, 70, 9, 65, 12, 5, 59, 56, 38, 37, 18, 42, 58, 3, 0, 63, 11, 39, 22, 24, 21, 28, 40, 60, 17, 53, 30, 67, 23, 68, 14, 2, 8, 47, 7, 31, 6, 13, 57, 52, 25, 44, 19, 48, 49])
 
 #    test_randomness_with_several_pps(backend, synth_method, logical_qubits, 20)
 #   input()
-    topo_m = map_topology(mapping, topo)
+#    topo_m = map_topology(mapping, topo)
+#    tree_m = map_tree(mapping, tree)
     pp_m = permute_with_mapping(mapping, pp, topo.num_qubits)
-    tree_m = map_tree(mapping, tree)
-    order = order_gadgets(pp, topo)
+    order = order_gadgets(pp_m, topo)
     print('pre defined order with mapping')
-    print_pp(pp, order=order)
-#    order = [0,1,2,3,4,5,6,7,8,9]
-#    order = [3, 24, 26, 27, 49, 63, 64, 50, 20, 4, 55, 32, 17, 8, 45, 47, 57, 51, 11, 2, 37, 61, 30, 38, 43, 34, 66, 46, 14, 65, 36, 29, 70, 19, 52, 0, 60, 31, 39, 1, 5, 12, 9, 10, 54, 16, 69, 33, 18, 44, 25, 58, 68, 35, 15, 7, 67, 48, 28, 21, 42, 40, 56, 6, 62, 23, 22, 41, 53, 59, 13]
-#    order =  [3, 24, 26, 27, 49, 63, 64, 65, 47, 57, 38, 14, 34, 5, 8, 66, 20, 61, 29, 32, 55, 33, 68, 40, 10, 31, 54, 39, 17, 16, 59, 67, 4, 51, 44, 58, 25, 50, 9, 23, 2, 69, 0, 21, 45, 7, 48, 12, 6, 28, 11, 37, 56, 13, 60, 62, 1, 30, 43, 41, 46, 35, 36, 18, 19, 22, 42, 70, 53, 15, 52]
-#    order = [0, 4, 9, 5, 8, 15, 3, 12, 1, 7, 6, 13, 18, 11, 17, 16, 2, 14, 10] # optimal mapping
-#    order = [8, 10, 14, 20, 31, 39, 26, 12, 35, 32, 38, 28, 25, 33, 23, 7, 40, 16, 42, 15, 5, 4, 9, 36, 6, 22, 37, 24, 1, 27, 34, 43, 30, 41, 11, 3, 0, 17, 29, 2, 18, 21, 19, 13]
-#    order = [0, 2, 8, 6, 7, 1, 4, 9, 5, 3]
+    print_pp(pp_m, order=order)
+    order = [3, 24, 26, 27, 49, 63, 64, 7, 22, 17, 47, 57, 4, 20, 32, 8, 55, 45, 50, 6, 16, 35, 31, 14, 34, 10, 33, 9, 25, 28, 48, 52, 58, 2, 37, 21, 59, 12, 19, 62, 39, 46, 40, 68, 1, 42, 15, 36, 53, 54, 11, 70, 23, 56, 61, 29, 0, 13, 41, 66, 60, 43, 67, 44, 38, 69, 51, 18, 30, 5, 65]
     print('manual order')
-    print_pp(pp, order=order)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering_tree(pp.copy(), topo_m, tree_m, debug=False, print_order=order, random_sel=False)
+    print_pp(pp_m, order=order)
+    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering_tree(pp_m.copy(), topo, tree, debug=False, print_order=order, random_sel=False)
 #    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
     print('CNOT count:',cnot_count(circ_out))
     print('Pre-cx:', benchmarks['pre-cx'])
+    print('Last leg:', benchmarks['last_leg'])
     print('Density:\n', benchmarks['density'])
     print('seed',seed)
     print('gadget perm', gadget_perm)
     print()
-#    verify = check_circuit_equivalence(pp.copy(), circ_out, gadget_perm, perm)
-#    print('Circuit equivalence:', verify)
+    verify = check_circuit_equivalence(pp_m.copy(), circ_out, gadget_perm, perm)
+    print('Circuit equivalence:', verify)
 #    input()
 
 #    test_randomness(pp, backend, mapping, synth_method)

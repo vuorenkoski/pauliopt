@@ -222,7 +222,7 @@ def propagate_circuit(
         pp.propagate(gate, sub_columns)
 
 
-def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, random_sel=True):
+def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, tree, random_sel=False):
     if pp.num_qubits != topo.num_qubits:
         raise ValueError(
             f"Number of logical qubits {pp.num_qubits} does not match number of physical qubits {topo.num_qubits}"

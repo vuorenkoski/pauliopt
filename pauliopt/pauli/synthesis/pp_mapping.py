@@ -21,7 +21,7 @@ def I_index_mapping(pp: PauliPolynomial, topo: Topology):
     weights = edges_by_I_index(pp)
 #    mapping = map_graphs_by_chains(weights, topo)
     mapping = map_qubits_from_center(weights, pp, topo)
-    return mapping
+    return mapping, None
 
 def edges_by_I_index(pp: PauliPolynomial):
     """ Gives edges weight by calculating gadgets having both qubits non-I.
@@ -442,7 +442,7 @@ def map_qubits_as_tree(correlations, pp, topo):
         max_free_degree = -1
         for nmpq in range(num_physical_qubits):
 
-            # Check that qubiut is not mapped
+            # Check that qubit is not mapped
             if nmpq in mapped_physical_qubits:
                 continue
 
