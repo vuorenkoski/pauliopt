@@ -88,10 +88,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     debug and print_sorted_gd(gadget_data, order=print_order)
     while removed_gadgets_num < num_gadgets:
         # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
-#        if tree is None:
         next = next_gadget(general_data)
-#        else:
-#            next = next_gadget2(general_data, node_levels)
         debug and print('-------Next gadget:', next)
         num_legs = 0
         for j in range(num_qubits):
@@ -319,6 +316,7 @@ def next_gadget(general_data):
     gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     closest = -1
+    num_closest = 0
     distance = num_qubits*2
     for i in range(num_gadgets):
         if removed_gadgets[i]:
@@ -328,6 +326,11 @@ def next_gadget(general_data):
         if dist < distance:
             distance = dist
             closest = i
+            num_closest = 1
+        elif dist == distance:
+            num_closest += 1
+#    if num_closest > 1:
+#        print('next gadget options:', num_closest)
     return closest
 
 def next_gadget_with_node_levels(general_data, node_levels):
@@ -356,8 +359,6 @@ def next_gadget_with_node_levels(general_data, node_levels):
                 count = [i]
             elif this_level == level:
                 count.append(i)
-#    if len(count) > 1:
-#        print('count:', count)
     return closest
 
 def next_gadget_efficient_removal(general_data, gate_combinations):
@@ -393,27 +394,6 @@ def next_gadget_efficient_removal(general_data, gate_combinations):
             print_sorted_gd(gadget_data)
             input()
         return max_gadget   
-
-def next_gadget2(general_data, node_levels):
-    """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph, pauligraph_degrees, last_edge = general_data
-    num_qubits, num_gadgets = gadget_data.shape
-    closest = -1
-    min_level = num_qubits
-    distance = -1
-    for i in range(num_gadgets):
-        if removed_gadgets[i]:
-            continue
-        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
-#        level = get_gadget_level(node_levels, pauligraph_degrees, i)
-        dist = nodes + (s_nodes * 2)
-        if distance == -1 or dist < distance:
-            distance = dist
-            closest = i
-#        elif dist == distance and level < min_level:
-#            min_level = level
-#            closest = i
-    return closest
 
 def get_gadget_level(node_levels, pauligraph_degrees, gadget_index):
     max_level = 0
