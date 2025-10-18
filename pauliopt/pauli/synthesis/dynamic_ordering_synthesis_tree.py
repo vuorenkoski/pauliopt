@@ -60,22 +60,12 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
         tree_graph = mapping_tree(gadget_data, topo, tree, i)
         create_pauligraph_from_tree_graph(tree_graph, pauligraph_degrees, last_edge, i)
     tree_graph = topology_tree(gadget_data, tree)
-    gate_combinations = {} # Immutable dictionary of possible gates for each pair of paulis and targets
-    for p1 in [0b00, 0b01, 0b10, 0b11]:
-        for p2 in [0b00, 0b01, 0b10, 0b11]:
-            for target0 in [False, True]: # Is target to have I or not after gates in qubit0
-                for target1 in [False, True]: # Is target to have I or not after gates in qubit1
-                    options = possible_gates((p1, p2), target0, target1)
-                    gate_combinations[((p1, p2), target0, target1)] = options
     general_data = (gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge)
     circ_data = (qc_out, qc_prop)
 
-    if tree is not None:
-        node_levels = dict()
-        root, tree_children = tree
-        node_levels_from_tree(tree_children, root, node_levels)
-    else:
-        node_levels = None
+    node_levels = dict()
+    root, tree_children = tree
+    node_levels_from_tree(tree_children, root, node_levels)
 
     debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
@@ -101,7 +91,7 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
         # Loop going through qubits in gadget, removing them one by one
         while num_legs > 1:
             # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
-            edge, gates, score = next_edge_to_remove(next, general_data, gate_combinations, removed_gadgets_num, random_sel=random_sel)
+            edge, gates, score = next_edge_to_remove(next, general_data)
             debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
             rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, tree_graph)
             removed_gadgets_num += rgadgets
@@ -190,7 +180,7 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     gadget_data[qubit,gadget_index] = 0b00
 
 
-def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_gadgets_num, random_sel=False):
+def next_edge_to_remove(gadget_index, general_data):
     """Decide what edge to remove next and what gates to apply"""
     # This version primarily chooses gates which minimizes overall effect to the length of chains. 
     # If there are many options having the same score, it secondarily tries to remove/avoid identity gates from the middle of chains.
@@ -204,111 +194,91 @@ def next_edge_to_remove(gadget_index, general_data, gate_combinations, removed_g
             edge_options.append((q,int(last_edge[gadget_index,q])))
 
     # find possible gates for each edge option
+    score = dict()
     edge_gates = []
     for qubit0,qubit1 in edge_options:
         if gadget_data[qubit1,gadget_index] == 0b00: #swap needed
-            options = gate_combinations[((gadget_data[qubit0,gadget_index],gadget_data[qubit1,gadget_index]),False,False)]
-            edge_gates.append(options)
+            if gadget_data[qubit0,gadget_index] == 0b11: # We need to change Y to (Y or X): gate I,SV
+                gate0 = [apply_I, apply_sv]
+            elif gadget_data[qubit0,gadget_index] == 0b01: # We need to change X to (Y or X): gate I, V
+                gate0 = [apply_I, apply_v]
+            else: # We need to change Z to (Y or X): gate V,SV
+                gate0 = [apply_v, apply_sv]
+            gate1 = [apply_s, apply_v, apply_vs] # second is I so any gate is good
         else:
-            options = gate_combinations[((gadget_data[qubit0,gadget_index],gadget_data[qubit1,gadget_index]),True,False)]
-            edge_gates.append(options)
-#        print(get_gates(edge_gates[-1]))
-    if num_gadgets - removed_gadgets_num == 1: # Only one gadget left, choose any
-        return edge_options[0], get_gates(edge_gates[0])[0], 0
+            if gadget_data[qubit0,gadget_index] == 0b11: # We need to change Y to Z: gate V
+                gate0 = [apply_v]
+            elif gadget_data[qubit0,gadget_index] == 0b01: # We need to change X to Z: gate SV
+                gate0 = [apply_sv]
+            else: # We need to change Z to Z: gate I
+                gate0 = [apply_I]
+            if gadget_data[qubit1,gadget_index] == 0b11: # We need to change Y to (Y or Z): gate V,VS
+                gate1 = [apply_v, apply_vs]
+            elif gadget_data[qubit1,gadget_index] == 0b01: # We need to change X to (Y or Z): gate S, VS
+                gate1 = [apply_s, apply_vs]
+            else: # We need to change Z to (Y or Z): gate S, V
+                gate1 = [apply_s, apply_v]
+        edge_gates.append((gate0, gate1))
 
-    score = np.zeros((len(edge_options),9), dtype=int)
-    snode_score = np.zeros((len(edge_options),9), dtype=int)
-    for gadget in range(num_gadgets): # For each non-removed gadget, check how different edge+gate combinations would affect it
+        for g0 in gate0:
+            for g1 in gate1:
+                score[((qubit0,qubit1),g0,g1)] = 0
+
+    for gadget in range(num_gadgets):
         if removed_gadgets[gadget]:
             continue
-
         for e in range(len(edge_options)):
             qubit0,qubit1 = edge_options[e]
-            gates0 = edge_gates[e]
-            qubit0_degree = pauligraph_degrees[gadget,qubit0]
-            qubit1_degree = pauligraph_degrees[gadget,qubit1]
-            pauli0 = gadget_data[qubit0,gadget]
-            pauli1 = gadget_data[qubit1,gadget]
-            legs = (gadget_data[qubit0,gadget], gadget_data[qubit1,gadget])
-            node_gates = 0
-            snode_gates = 0
-            node_change = 0
-            snode_change = 0
+            pauli0 = int(gadget_data[qubit0,gadget])
+            pauli1 = int(gadget_data[qubit1,gadget])
 
-            # Pair is in the middle of branch. Avoid I:s
-            if qubit0_degree > 1 and qubit1_degree > 1:
-                if pauli0 == 0b00 or pauli1 == 0b00:
-                    snode_gates = gates0 & gate_combinations[(legs,False,False)]
-                    snode_change = 1
-                else:
-                    snode_gates = gates0 & (gate_combinations[(legs,True,False)] | gate_combinations[(legs,False,True)])
-                    snode_change = -1
-
-            # Pair is last pair in a brach in this gadget also. Try turn first qubit to I
-            elif qubit0_degree == 1 and qubit1_degree > 1:
-                if pauli1 == 0b00:
-                    snode_gates = gates0 & gate_combinations[(legs,False,False)]
-                    snode_change = +1
-                else: #both qubit are non-I
-                    node_gates = gates0 & gate_combinations[(legs,True,False)]
-                    node_change = 1
-                    snode_gates = gates0 & gate_combinations[(legs,False,True)]
-                    snode_change = -1
-
-            # Same situation but reversed
-            elif qubit0_degree > 1 and qubit1_degree == 1:
-                if pauli0 == 0b00:
-                    snode_gates = gates0 & gate_combinations[(legs,False,False)]
-                    snode_change = +1
-                else:
-                    snode_gates = gates0 & gate_combinations[(legs,True,False)]
-                    snode_change = -1
-                    node_gates = gates0 & gate_combinations[(legs,False,True)]
-                    node_change = 1
-
-            # Pair touches a branch. Try not to extend branch
-            elif qubit1_degree == 0 or qubit0_degree == 0:
-                node_gates = gates0 & gate_combinations[(legs,False,False)]
-                node_change = -1
-
-            # Pair is last pair in a brach in this gadget. Try turn one qubit to I
-            elif qubit0_degree == 1 and qubit1_degree == 1:
-                node_gates = gates0 & (gate_combinations[(legs,False,True)] | gate_combinations[(legs,True,False)])
-                node_change = 1
-
-            for i in range(9):
-                if snode_gates & (1<<i):
-                    snode_score[e,i] += snode_change
-                if node_gates & (1<<i):
-                    score[e,i] += node_change
-
-    option_possibilities = []
+            for gate0 in edge_gates[e][0]:
+                for gate1 in edge_gates[e][1]:
+                    new_pauli0, phase = gate0(pauli0)
+                    new_pauli1, phase = gate1(pauli1)
+                    new_pauli0, new_pauli1, phase = apply_cnot(new_pauli0, new_pauli1)
+                    score_change = get_score(general_data, gadget, qubit0, qubit1, new_pauli0, new_pauli1, pauli0, pauli1)
+                    score[(edge_options[e],gate0,gate1)] += score_change
+#                    print(f'Gadget {gadget} edge {edge_options[e]} gate0 {gate0.__name__} gate1 {gate1.__name__} score change {score_change} total score {score[(edge_options[e],gate0,gate1)]}')
+#    print(score)
+    min_score = None
     for e in range(len(edge_options)):
-        gates = edge_gates[e]
-        for i in range(9):
-            if (gates & (1<<i)) > 0:
-                option_possibilities.append((e, i, score[e,i], snode_score[e,i]))
-    option_possibilities.sort(key=lambda x: (-x[2], -x[3]))
+        for gate0 in edge_gates[e][0]:
+            for gate1 in edge_gates[e][1]:
+                if min_score is None or score[(edge_options[e],gate0,gate1)] < min_score:
+                    min_score = score[(edge_options[e],gate0,gate1)]
+                    edge = edge_options[e]
+                    gates = (gate0, gate1, False)
+    return edge, gates, min_score
 
-    if len(option_possibilities) == 0:
-        print('ERROR: no edge+gate combinations found')
-        print('gadget:', gadget_index)
-        print('gadget data:', gadget_data[:,gadget_index])
-        print('pauligraph degrees:', pauligraph_degrees[gadget_index,:])
-        input()
+def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1, original_pauli0, original_pauli1):
+    # 10x more score if chain is extended/shortened
+    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+    score = 0
+#    print(gadget_index, qubit0, qubit1, new_pauli0, new_pauli1, original_pauli0, original_pauli1)
+    if new_pauli0 != 0b00 and original_pauli0 == 0b00: # addition
+        if pauligraph_degrees[gadget_index,qubit0] == 0: # outside of chain, negative
+            score = 10
+        else:                                            # middle of chain, positive
+            score = -1
+    if new_pauli1 != 0b00 and original_pauli1 == 0b00: # addition
+        if pauligraph_degrees[gadget_index,qubit1] == 0: # outside of chain, negative
+            score = 10
+        else:                                            # middle of chain, positive
+            score = -1
+            pass
 
-    if random_sel:
-        max_score = option_possibilities[0][2]
-        max_I_score = option_possibilities[0][3]
-        best_options = []
-        for x in option_possibilities:
-            if x[2] == max_score and x[3] == max_I_score:
-                best_options.append((x[0], x[1]))
-        edge_gates = random.choice(best_options)
-    else:
-        edge_gates = option_possibilities[0]
-    return edge_options[edge_gates[0]], get_gate(1<<edge_gates[1]), edge_gates[2]
-
+    if new_pauli0 == 0b00 and original_pauli0 != 0b00: # deletion
+        if pauligraph_degrees[gadget_index,qubit0] == 1: # end of chain, positive
+            score = -10
+        else:                                            # middle of chain, negative
+            score = 1
+    if new_pauli1 == 0b00 and original_pauli1 != 0b00: # deletion
+        if pauligraph_degrees[gadget_index,qubit1] == 1: # end of chain, positive
+            score = -10
+        else:                                            # middle of chain, negative
+            score = 1
+    return score
 
 def next_gadget(general_data):
     """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
@@ -331,75 +301,6 @@ def next_gadget(general_data):
 #    if num_closest > 1:
 #        print('next gadget options:', num_closest)
     return closest
-
-def next_gadget_with_node_levels(general_data, node_levels):
-    """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
-    num_qubits, num_gadgets = gadget_data.shape
-    closest = -1
-    distance = num_qubits*2
-    level = -1
-    count = []
-    for i in range(num_gadgets):
-        if removed_gadgets[i]:
-            continue
-        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
-        this_level = get_gadget_level(node_levels, pauligraph_degrees, i)
-        dist = nodes + (s_nodes * 2)
-        if dist < distance:
-            distance = dist
-            closest = i
-            level = this_level
-            count = [i]
-        elif dist == distance:
-            if this_level < level:
-                level = this_level
-                closest = i
-                count = [i]
-            elif this_level == level:
-                count.append(i)
-    return closest
-
-def next_gadget_efficient_removal(general_data, gate_combinations):
-    """ Check all closest gadgets, which one most shortens gadgets. Takes more time, littlebbit more efficient"""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
-    num_qubits, num_gadgets = gadget_data.shape
-    closest = []
-    distance = num_qubits*2
-    for i in range(num_gadgets):
-        if removed_gadgets[i]:
-            continue
-        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
-        dist = nodes + (s_nodes * 2)
-        if dist < distance:
-            distance = dist
-            closest = [i]
-        elif dist == distance:
-            closest.append(i)
-
-    max_score = - num_gadgets*2
-    max_gadget = -1
-    if len(closest) == 1:
-        return closest[0]
-    else:
-        for gadget in closest:
-            edge, gates, score = next_edge_to_remove(gadget, general_data, gate_combinations, 0)
-            if score > max_score:
-                max_score = score
-                max_gadget = gadget
-        if max_gadget == -1:
-            print('ERROR: no gadget found')
-            print('closest:', closest)
-            print_sorted_gd(gadget_data)
-            input()
-        return max_gadget   
-
-def get_gadget_level(node_levels, pauligraph_degrees, gadget_index):
-    max_level = 0
-    for i in range(pauligraph_degrees.shape[1]):
-        if pauligraph_degrees[gadget_index,i] > 0:
-            max_level = max(max_level, node_levels[i])
-    return max_level
 
 def node_levels_from_tree(tree_children, node, node_levels):
     if tree_children[node] is None:
@@ -456,7 +357,7 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
     qc_out.cx(qubit1, qubit2)
     qc_prop.append(CX(qubit1, qubit2))
 
-    # Propagate CNOT gate through all remaining gadgets
+    # Propagate gates through all remaining gadgets
     removed_gadgets_num = 0
     for gadget_index in range(num_gadgets):
         if removed_gadgets[gadget_index]:
@@ -645,123 +546,6 @@ def apply_cnot(p1, p2):
     pauli1 = (p1 & 0b01) | ((p1 ^ p2) & 0b10)
     pauli2 = ((p1 ^ p2) & 0b01) | (p2 & 0b10)
     return pauli1, pauli2, phase
-
-def possible_gates(paulis,target0, target1):
-    """Return possible gates for given pair of paulis and targets to have or have not I.
-    Possible gates include possible single qubit gate for qubit1, single qubit gate for qubit2 and cnot direction.
-    :params paulis: tuple of two chars, e.g. (0b01, 0b11) or (0b00, 0b10)
-    :params target0: True if qubit0 should have I, False if it should not have I
-    :params target1: True if qubit1 should have I, False if it should not have I
-    :returns: 9-bit integer coding possible gate combinations."""
-    # CHANGED SO THAT IT RETURNS ONLY 9 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
-    # Possibilities for first: I, V SV
-    # Possibilities for second: S, V, VS
-    # There is legacy code because of previous 72 possibilities
-    gates_none = np.zeros((2,6,6), dtype=object)
-    convert_to_X = {0b01: [0,1], 0b11: [2,5], 0b10: [3,4]}
-    convert_to_Y = {0b01: [2,4], 0b11: [0,3], 0b10: [1,5]}
-    convert_to_Z = {0b01: [3,5], 0b11: [1,4], 0b10: [0,2]}
-
-    if target0 and target1 and paulis[0] == 0b00 and paulis[1] == 0b00:   # current and target is II
-        paulis_options = np.ones((2,6,6), dtype=object)                 # all gates
-    elif paulis[0] == 0b00 and paulis[1] == 0b00:                         # current is ??, target is II
-        paulis_options = gates_none
-    elif target0 and target1:  
-        paulis_options = gates_none
-    elif target0 and not target1 and paulis[0] != 0b00 and paulis[1] == 0b00: # Swap needed, not possible
-        paulis_options = gates_none
-    elif not target0 and target1 and paulis[0] == 0b00 and paulis[1] != 0b00: # Swap needed, not possible
-        paulis_options = gates_none
-    elif target0 and not target1:
-        paulis_options = gates_none
-        if paulis[0] == 0b00:
-            for i in range(6):
-                paulis_options[np.ix_([0],[i],convert_to_X[paulis[1]])] = 1
-                paulis_options[np.ix_([1],[i],convert_to_Z[paulis[1]])] = 1 #1q-h
-        else:
-            paulis_options[np.ix_([1], convert_to_X[paulis[0]], convert_to_X[paulis[1]])] = 1 # XX
-            paulis_options[np.ix_([1], convert_to_X[paulis[0]], convert_to_Y[paulis[1]])] = 1 # XY
-            paulis_options[np.ix_([0], convert_to_Z[paulis[0]], convert_to_Z[paulis[1]])] = 1 # ZZ
-            paulis_options[np.ix_([0], convert_to_Z[paulis[0]], convert_to_Y[paulis[1]])] = 1 # YZ
-    elif not target0 and target1:
-        paulis_options = gates_none
-        if paulis[1] == 0b00:
-            for i in range(6):
-                paulis_options[np.ix_([1],convert_to_X[paulis[0]],[i])] = 1
-                paulis_options[np.ix_([0],convert_to_Z[paulis[0]],[i])] = 1 #1q-h
-        else:
-            paulis_options[np.ix_([0], convert_to_X[paulis[0]], convert_to_X[paulis[1]])] = 1 # XX
-            paulis_options[np.ix_([0], convert_to_Y[paulis[0]], convert_to_X[paulis[1]])] = 1 # YX
-            paulis_options[np.ix_([1], convert_to_Z[paulis[0]], convert_to_Z[paulis[1]])] = 1 # ZZ
-            paulis_options[np.ix_([1], convert_to_Y[paulis[0]], convert_to_Z[paulis[1]])] = 1 # YZ
-
-    elif not target0 and not target1:
-        paulis_options = gates_none.copy()
-        if paulis[0] != 0b00 and paulis[1] != 0b00:   # XY<->YZ, XZ<->YY, ZX<->ZX:   XY,XZ,   ZX,   YZ, YY
-            paulis_options[np.ix_([0], convert_to_X[paulis[0]], convert_to_Y[paulis[1]])] = 1
-            paulis_options[np.ix_([0], convert_to_X[paulis[0]], convert_to_Z[paulis[1]])] = 1
-            paulis_options[np.ix_([0], convert_to_Z[paulis[0]], convert_to_X[paulis[1]])] = 1
-            paulis_options[np.ix_([0], convert_to_Y[paulis[0]], convert_to_Z[paulis[1]])] = 1
-            paulis_options[np.ix_([0], convert_to_Y[paulis[0]], convert_to_Y[paulis[1]])] = 1
-
-            paulis_options[np.ix_([1], convert_to_Y[paulis[0]], convert_to_X[paulis[1]])] = 1
-            paulis_options[np.ix_([1], convert_to_Z[paulis[0]], convert_to_X[paulis[1]])] = 1
-            paulis_options[np.ix_([1], convert_to_X[paulis[0]], convert_to_Z[paulis[1]])] = 1
-            paulis_options[np.ix_([1], convert_to_Z[paulis[0]], convert_to_Y[paulis[1]])] = 1
-            paulis_options[np.ix_([1], convert_to_Y[paulis[0]], convert_to_Y[paulis[1]])] = 1
-        if paulis[0] == 0b00 and paulis[1] != 0b00:   # XI, YI, IY, IZ
-            for i in range(6):
-                paulis_options[np.ix_([0],[i],convert_to_Y[paulis[1]])] = 1
-                paulis_options[np.ix_([0],[i],convert_to_Z[paulis[1]])] = 1
-                paulis_options[np.ix_([1],[i],convert_to_X[paulis[1]])] = 1
-                paulis_options[np.ix_([1],[i],convert_to_Y[paulis[1]])] = 1
-        if paulis[0] != 0b00 and paulis[1] == 0b00:
-            for i in range(6):
-                paulis_options[np.ix_([1],convert_to_Y[paulis[0]],[i])] = 1
-                paulis_options[np.ix_([1],convert_to_Z[paulis[0]],[i])] = 1
-                paulis_options[np.ix_([0],convert_to_X[paulis[0]],[i])] = 1
-                paulis_options[np.ix_([0],convert_to_Y[paulis[0]],[i])] = 1
-    else:
-        print('XXXX Should not happen')
-
-    options = []
-#    for i, cnot_reversed in enumerate([False, True]):
-    for j, first_qubit in enumerate([apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]):
-        for k, second_qubit in enumerate([apply_I, apply_v, apply_s, apply_svs, apply_vs, apply_sv]):
-            if paulis_options[0,j,k] == 1:
-                options.append((first_qubit, second_qubit, False))
-
-    # Adapt the new 9 possibilities coding
-    options2 = 0 
-    for j, first_qubit in enumerate([apply_I, apply_v, apply_sv]):
-        for k, second_qubit in enumerate([apply_v, apply_s, apply_vs]):
-            if (first_qubit, second_qubit, False) in options:
-                options2 |= 1 << (j*3 + k)
-
-    return options2
-
-def get_gates(gate_set):
-    """Return gate combinations for given gate set indicated by 9-bit integer.
-    :params gate_set: 9-bit integer coding possible gate combinations.
-    :returns: list of tuples (first_qubit_gate, second_qubit_gate, cnot direction).
-    """
-    # CHANGED SO THAT IT RETURNS ONLY 9 POSSIBLE COMBINATIONS, NOT DISTINGUISHING CNOT DIRECTION
-    gates = []
-    for j, first_qubit in enumerate([apply_I, apply_v, apply_sv]):
-        for k, second_qubit in enumerate([apply_v, apply_s, apply_vs]):
-            gate = 1 << (j*3 + k)
-            if gate & gate_set > 0:
-                gates.append((first_qubit, second_qubit, False))
-    return gates
-
-def get_gate(gate_set):
-    first = [apply_I, apply_v, apply_sv]
-    second = [apply_v, apply_s, apply_vs]
-    i = -1
-    while gate_set > 0:
-        gate_set >>= 1
-        i +=1
-    return first[i//3], second[i%3], False
 
 #
 #

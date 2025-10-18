@@ -4,8 +4,9 @@ import pandas as pd
 import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
-from pauliopt.pauli.synthesis.dynamic_ordering_synthesis import pauli_polynomial_dynamic_ordering
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_tree import pauli_polynomial_dynamic_ordering_tree
+from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_treem import pauli_polynomial_dynamic_ordering_treem
+from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_leg import pauli_polynomial_dynamic_ordering_leg
 from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
@@ -360,32 +361,33 @@ def test_random_gadget_ordering(pp, backend, mapping, tree,synth_method, rounds=
 
 if __name__ == "__main__":
     methods = [pauli_polynomial_dynamic_ordering_tree, pauli_polynomial_steiner_gray_clifford]
+#    methods = [pauli_polynomial_dynamic_ordering_treem, pauli_polynomial_dynamic_ordering_tree]
     verify = False
     mapping_method = pauli_tree_mapping
 #    mapping_method = I_index_mapping
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
-#    steps = list(range(200, 1000, 50))
+#    steps = list(range(700, 2000, 100))
 #    steps = list(range(20, 220, 20))
 #    steps = list(range(20, 220, 20)) + list(range(200, 2000, 100))
 #    backend = {'name': 'quito', 'qubits': 5}
-    backend = {'name': 'guadalupe', 'qubits': 16}
-#    backend = {'name': 'grid', 'qubits': 9}
+#    backend = {'name': 'guadalupe', 'qubits': 16}
+    backend = {'name': 'grid', 'qubits': 9}
 #    backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
 #    trivial_mapping = [19,20,21,22,23,24,25,33,34,38,39,40,41,42,43,44] # 16 qubits in brisbane
 #    trivial_mapping = [19,20,21,22,23,24,25,26,27,28,29,33,34,35,38,39,40,41,42,43,44,45,46,47,48,53,54,60,61,62,63,64] # 32 qubits in brisbane
-    logical_qubits = 16
+    logical_qubits = 9
     trivial_mapping = list(range(logical_qubits))
     samples = 200
     max_legs = None
     
 #    print_brisbane_topo()
 #    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, 
-#                           allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-#    input()
+    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, 
+                           allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+    input()
 
 
     #
@@ -394,6 +396,7 @@ if __name__ == "__main__":
     seed = 42
     random.seed(seed)
     gadgets = 80
+    synth_method = pauli_polynomial_dynamic_ordering_tree
     backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'grid', 'qubits': 9}
 #    backend = {'name': 'brisbane', 'qubits': 127}
@@ -406,7 +409,6 @@ if __name__ == "__main__":
     print_pp(pp)
 
     topo = get_topo(backend['name'], backend['qubits'])
-    synth_method = pauli_polynomial_dynamic_ordering_tree
 #    synth_method = pauli_polynomial_steiner_gray_clifford
 #    mapping = mapping_method(pp, topo)
     mapping, tree = pauli_tree_mapping(pp, topo) # mapping produces 112 with 80,42
@@ -422,6 +424,7 @@ if __name__ == "__main__":
 #    print('mapping algorithm order', qubit_order(mapping))
 #    test_randomness(pp, backend, mapping, synth_method, rounds=10000)
 
+#    pp = reorder_gadgets(pp, [53, 60, 21, 57, 33, 49, 41, 23, 51, 22, 43, 13, 28, 15, 5, 40, 59, 54, 61, 31, 7, 69, 46, 36, 47, 10, 9, 1, 12, 52, 48, 38, 26, 70, 20, 44, 68, 66, 18, 11, 42, 67, 56, 8, 37, 24, 63, 29, 14, 16, 25, 65, 19, 58, 27, 55, 0, 64, 4, 39, 62, 3, 2, 30, 35, 17, 50, 32, 6, 45, 34])
 #    min_cx_mapping, max_cx_mapping, mean_cx = all_mappings(pp, backend, synth_method=synth_method)
 #   print('testing min_cx randomness')
 #    mean_min = test_random_gadget_ordering(pp, backend, min_cx_mapping, synth_method, rounds=1000)
@@ -431,8 +434,11 @@ if __name__ == "__main__":
 #    test_random_gadget_ordering(pp, backend, mapping, tree, synth_method, rounds=10000)
 #    input()
     pp_m = permute_with_mapping(mapping, pp, topo.num_qubits)
-#    pp_m = reorder_gadgets(pp_m, [53, 60, 21, 57, 33, 49, 41, 23, 51, 22, 43, 13, 28, 15, 5, 40, 59, 54, 61, 31, 7, 69, 46, 36, 47, 10, 9, 1, 12, 52, 48, 38, 26, 70, 20, 44, 68, 66, 18, 11, 42, 67, 56, 8, 37, 24, 63, 29, 14, 16, 25, 65, 19, 58, 27, 55, 0, 64, 4, 39, 62, 3, 2, 30, 35, 17, 50, 32, 6, 45, 34])
-    pp_m = reorder_gadgets(pp_m, [40, 20, 69, 2, 53, 23, 19, 32, 41, 15, 68, 55, 28, 16, 37, 29, 22, 21, 4, 33, 52, 5, 43, 14, 26, 9, 38, 61, 48, 67, 70, 18, 46, 45, 7, 66, 36, 47, 56, 57, 42, 62, 35, 54, 27, 39, 34, 17, 6, 0, 60, 49, 10, 44, 58, 64, 24, 8, 30, 13, 51, 63, 1, 31, 3, 11, 59, 25, 65, 50, 12])
+
+    # this is ver good ordering for mapping algorithm, produces 95 cnots (compared to 112 in trivial order)
+    pp_m = reorder_gadgets(pp_m, [53, 60, 21, 57, 33, 49, 41, 23, 51, 22, 43, 13, 28, 15, 5, 40, 59, 54, 61, 31, 7, 69, 46, 36, 47, 10, 9, 1, 12, 52, 48, 38, 26, 70, 20, 44, 68, 66, 18, 11, 42, 67, 56, 8, 37, 24, 63, 29, 14, 16, 25, 65, 19, 58, 27, 55, 0, 64, 4, 39, 62, 3, 2, 30, 35, 17, 50, 32, 6, 45, 34])
+    # this is poor ordering 138
+#    pp_m = reorder_gadgets(pp_m, [40, 20, 69, 2, 53, 23, 19, 32, 41, 15, 68, 55, 28, 16, 37, 29, 22, 21, 4, 33, 52, 5, 43, 14, 26, 9, 38, 61, 48, 67, 70, 18, 46, 45, 7, 66, 36, 47, 56, 57, 42, 62, 35, 54, 27, 39, 34, 17, 6, 0, 60, 49, 10, 44, 58, 64, 24, 8, 30, 13, 51, 63, 1, 31, 3, 11, 59, 25, 65, 50, 12])
 #    test_randomness_with_several_pps(backend, synth_method, logical_qubits, 20)
 #   input()
 #    topo_m = map_topology(mapping, topo)
@@ -440,11 +446,11 @@ if __name__ == "__main__":
     print_order = order_gadgets(pp_m, topo)
     print('pre defined order with mapping')
     print_pp(pp_m, order=print_order)
-    print_order = [24, 44, 51, 55, 56, 61, 64, 11, 57, 7, 1, 39, 18, 19, 42, 33, 37, 69, 0, 4, 13, 2, 22, 26, 16, 21, 12, 15, 46, 53, 25, 23, 20, 63, 59, 31, 8, 6, 38, 30, 41, 14, 28, 66, 10, 70, 3, 29, 62, 5, 36, 50, 17, 27, 48, 54, 67, 40, 68, 9, 60, 52, 65, 58, 47, 43, 34, 35, 45, 49, 32]
-#    print_order = [5, 32, 45, 46, 54, 57, 61, 3, 24, 65, 4, 64, 0, 39, 70, 23, 48, 43, 2, 16, 68, 49, 10, 34, 52, 69, 66, 19, 33, 37, 11, 1, 9, 6, 15, 26, 58, 8, 31, 59, 42, 38, 56, 18, 14, 25, 17, 53, 51, 44, 47, 28, 22, 7, 35, 50, 41, 40, 55, 20, 29, 62, 63, 60, 12, 21, 30, 13, 36, 67, 27]
+#    print_order = [24, 44, 51, 55, 56, 61, 64, 11, 57, 7, 1, 39, 18, 19, 42, 33, 37, 69, 0, 4, 13, 2, 22, 26, 16, 21, 12, 15, 46, 53, 25, 23, 20, 63, 59, 31, 8, 6, 38, 30, 41, 14, 28, 66, 10, 70, 3, 29, 62, 5, 36, 50, 17, 27, 48, 54, 67, 40, 68, 9, 60, 52, 65, 58, 47, 43, 34, 35, 45, 49, 32]
+#    print_order = [5, 32, 45, 46, 54, 57, 61, 3, 24, 4, 33, 65, 55, 0, 18, 39, 31, 36, 15, 22, 26, 9, 12, 70, 14, 11, 25, 35, 47, 16, 7, 21, 58, 52, 17, 2, 29, 10, 40, 42, 59, 49, 6, 67, 60, 53, 41, 64, 62, 38, 19, 51, 37, 1, 20, 8, 27, 23, 44, 66, 56, 68, 34, 28, 63, 13, 48, 43, 50, 30, 69]
     print('manual order')
     print_pp(pp_m, order=print_order)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering_tree(pp_m.copy(), topo, tree, debug=False, print_order=print_order, random_sel=False)
+    circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo, tree, debug=True, print_order=print_order, random_sel=False)
 #    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
     print('CNOT count:',cnot_count(circ_out))
     print('Pre-cx:', benchmarks['pre-cx'])
