@@ -248,7 +248,7 @@ def next_edge_to_remove(gadget_index, general_data):
                 if min_score is None or score[(edge_options[e],gate0,gate1)] < min_score:
                     min_score = score[(edge_options[e],gate0,gate1)]
                     edge = edge_options[e]
-                    gates = (gate0, gate1, False)
+                    gates = (gate0, gate1)
     return edge, gates, min_score
 
 def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1, original_pauli0, original_pauli1):
@@ -321,15 +321,8 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
     qc_out, qc_prop = circ_data
     num_qubits, num_gadgets = gadget_data.shape
 
-    first_qubit, second_qubit, cnot_reversed = gates
-    if cnot_reversed:
-        qubit2,qubit1 = edge
-        gate2 = first_qubit
-        gate1 = second_qubit
-    else:
-        qubit1,qubit2 = edge
-        gate1 = first_qubit
-        gate2 = second_qubit
+    gate1,gate2 = gates
+    qubit1,qubit2 = edge
     for gate, qubit in [(gate1, qubit1), (gate2, qubit2)]:
         if gate == apply_v:
             qc_out.v(qubit)
