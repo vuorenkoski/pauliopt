@@ -1,7 +1,6 @@
 import networkx as nx
 from experiments.utils import cnot_count_density
 import numpy as np
-import random
 
 from pauliopt.clifford.clifford_tableau import CliffordTableau
 from pauliopt.gates import CX, Vdg, Sdg
@@ -11,41 +10,35 @@ from pauliopt.pauli_strings import I, X, Y, Z
 from pauliopt.topologies import Topology
 from tests.pauli.utils import verify_equality
 
-# This idea is that algorithm resolves gadgets in order from smallest to largest, chains strings which does not have I
-# in the middle are prioritised. One gadgets is chosen from the top of the order each time. This gadget is resolved from
-# the edges of the chain/branches. Edge to be removed is chosen in order so that it best shortens next gadgets and/or
-# remove I:s from the middle of chain. Order is updated after each gadget is resolved.
+# The idea is that algorithm resolves gadgets in order by choosing nearest gadget as next to be resolved.
+# Distance of gadgets is measured by number of cnots needed to resolve the gadget. Gadget can be resolved
+# by many different paths. A path is composed from steps. In each step cnot is applied in addition to
+# single qubit gates. Single qubit gate for control is either I, V or S+V and for target V, S or V+S.
 
-# Algorithm creates steiner tree from each gadget with networkx function in the start of the algorithm
+# Path is formed step by step, so that each step removes one leg from gadget, or appends non-I leg  
+# where I is in the middle of non-I legs. From multiple step choices, one is selected which brings
+# non-resolved gadgets closer (removes legs in endings, or adds non-I leg to the middle)
 
-# Architecture agnostic version: https://arxiv.org/abs/2404.03280
-# This have two major differences: 1) does not consider topology, 2) does not allow ordering
-
-# This six different single qubit gates are used in the algorithm: I, V, S, VS, SV
-
-# Time complexity O(m^2 n x) where n is number of qubits and m number of gadgets. X depends on topology: maximum degree of
-# physical qubit (for example in line it is 2 and in grid 4). max of x is n-1.
-# we have to process m gadgets and n qubits, so n*m
-# Each opearation takes 9*m*x time
+# Topology of the target device is fitted to a tree. This tree must be provided for the algorithm. Every gadget
+# is fitted to this tree.
 
 def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
     num_gadgets = len(pp.pauli_gadgets)
-    removed_gadgets_num = 0
-    gadget_angles = []
-    removed_gadgets = np.zeros((num_gadgets), dtype=np.int8)
     qc_out = Circuit(num_qubits)
     qc_prop = []
     perm_gadgets = []
 
-    # Create datastructures
-    last_leg = np.zeros((num_qubits), dtype=int) # Last leg in each qubit
-    gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Dynamic matrix representing paulis
-    pauligraph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Dynamic matrix represnting degrees of node in steiner trees
-    last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) # Dynamic matrix representing last edges in tree branches
+    # Create algorithm datastructures
+    last_leg = np.zeros((num_qubits), dtype=int) # Last leg of gadget before removal (for analysis)
+    gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Matrix representing current status of paulipolynomial 
+    gadget_angles = []
+    removed_gadgets = np.zeros((num_gadgets), dtype=np.int8) # Array representing removed gadgets
+    gadget_graph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Matrix representing degrees of gadget graph
+    gadget_graph_last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) # Matrix representing last edges in gadget graph
     for i,gadget in enumerate(pp.pauli_gadgets):
         for j in range(num_qubits):
-            last_edge[i,j] = -1
+            gadget_graph_last_edge[i,j] = -1
             if gadget.paulis[j] == I:
                 gadget_data[j,i] = 0b00
             elif gadget.paulis[j] == X:
@@ -57,24 +50,20 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
             else:
                 raise ValueError(f'Unknown Pauli {gadget_data[j,i]} in gadget {i}')
         gadget_angles.append(gadget.angle)
-        tree_graph = mapping_tree(gadget_data, topo, tree, i)
-        create_pauligraph_from_tree_graph(tree_graph, pauligraph_degrees, last_edge, i)
-    tree_graph = topology_tree(gadget_data, tree)
-    general_data = (gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge)
+        create_gadget_graph(gadget_data, tree, gadget_graph_degrees, gadget_graph_last_edge, i)
+    device_topology = topology_from_tree(gadget_data, tree)
+    general_data = (gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge)
     circ_data = (qc_out, qc_prop)
-
-    node_levels = dict()
-    root, tree_children = tree
-    node_levels_from_tree(tree_children, root, node_levels)
 
     debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
 
-    # Main loop going through gadgets starting from smallest
-    removed_gadgets_num += check_for_singles(general_data, circ_data, perm_gadgets, last_leg)
+    # Remove possible gadgets having one leg
+    removed_gadgets_num = check_for_singles(general_data, circ_data, perm_gadgets, last_leg)
     debug and print_sorted_gd(gadget_data, order=print_order)
+
     while removed_gadgets_num < num_gadgets:
-        # Randomness 1: there are for example many gadgets having same size and no steiner nodes, how to arrange them?
+        # Select gadget to be processed next
         next = next_gadget(general_data)
         debug and print('-------Next gadget:', next)
         num_legs = 0
@@ -82,35 +71,36 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
             if gadget_data[j,next] != 0b00:
                 num_legs += 1
         if num_legs == 0:
-            print('ERROR: qubit map has no nodes')
-            print('gadget:', next)
+            print('ERROR: qubit map has no nodes, gadget:', next)
             print_sorted_gd(gadget_data)
-            print(perm_gadgets)
             input()
         
-        # Loop going through qubits in gadget, removing them one by one
+        # Loop going through legs in gadget, removing them one by one
         while num_legs > 1:
-            # randomness 2: if there are two or more edge+gate combinations having similar match, which one to choose?
-            edge, gates, score = next_edge_to_remove(next, general_data)
+            # Decide next step in path
+            edge, gates = next_leg_to_remove(next, general_data)
             debug and print('-------Next edge:', edge, 'gates:', gates, 'gadget', next)
-            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, tree_graph)
+            # Execute that step
+            rgadgets = add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, device_topology)
             removed_gadgets_num += rgadgets
             if gadget_data[edge[0], next] == 0b00:
                 num_legs -= 1
             debug and print_sorted_gd(gadget_data, order=print_order)
             debug and input()
 
-    # do clifford synthesis for the second part
+    # do clifford synthesis for the second part of the created circuit
     qc_prop_r = list(reversed(qc_prop))
     ct_prop = CliffordTableau(num_qubits)
     for gate in qc_prop_r:
         ct_prop.append_gate(gate)
     qc_prop_syn, permutation = ct_prop.to_clifford_circuit_perm_row_col(topo, include_swaps=False)
 
+    # Combine circuits
     circ_out = qc_out + qc_prop_syn
     circ_out.final_permutation = qc_prop_syn.final_permutation
     permutation = [circ_out.final_permutation[i] for i in range(pp.num_qubits)]
 
+    # Calculate some analysis data
     pre_cx = 0
     for gate in qc_out.gates:
         if isinstance(gate, CX):
@@ -118,7 +108,8 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     density = cnot_count_density(qc_out)
     return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density, 'last_leg': last_leg}
 
-def topology_tree(gadget_data, tree):
+def topology_from_tree(gadget_data, tree):
+    """Create device topology from gadget tree structure."""
     num_qubits, num_gadgets = gadget_data.shape
     root, tree_children = tree
     edges = []
@@ -128,21 +119,21 @@ def topology_tree(gadget_data, tree):
     G = nx.Graph(edges)
     return G
 
-def create_pauligraph_from_tree_graph(tree_graph, pauligraph_degrees, last_edge, gadget_index):
-    """Update connection datastructure based on qubit_map provided by networkx steinertree algorithm."""
-    num_qubits = pauligraph_degrees.shape[1]
+def create_gadget_graph(gadget_data, tree, gadget_graph_degrees, gadget_graph_last_edge, gadget_index):
+    """Create gadget graph_data structures from gadget tree graph."""
+    num_qubits = gadget_graph_degrees.shape[1]
+    tree_graph = map_gadget_as_tree(gadget_data, tree, gadget_index)
     for j in range(num_qubits):
         if tree_graph.has_node(j):
-            pauligraph_degrees[gadget_index,j] = tree_graph.degree[j]
+            gadget_graph_degrees[gadget_index,j] = tree_graph.degree[j]
             if tree_graph.degree[j] == 1:
-                last_edge[gadget_index,j] = list(tree_graph.edges(j))[0][1] # what is the border of edge node
+                gadget_graph_last_edge[gadget_index,j] = list(tree_graph.edges(j))[0][1] # what is the border of edge node
         else:
-            pauligraph_degrees[gadget_index,j] = 0
-
+            gadget_graph_degrees[gadget_index,j] = 0
 
 def check_for_singles(general_data, circ_data, perm_gadgets, last_leg):
     """ check if there are gadgets having only single leg and remove them if so."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     removed_gadgets_num = 0
 
@@ -160,10 +151,9 @@ def check_for_singles(general_data, circ_data, perm_gadgets, last_leg):
             last_leg[qubit] += 1
     return removed_gadgets_num
 
-
 def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     """ Remove gadget having single leg indicated by gadget_index."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     qc_out, qc_prop = circ_data
     pauli = gadget_data[qubit,gadget_index]
     removed_gadgets[gadget_index] = 1
@@ -180,24 +170,23 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     gadget_data[qubit,gadget_index] = 0b00
 
 
-def next_edge_to_remove(gadget_index, general_data):
-    """Decide what edge to remove next and what gates to apply"""
-    # This version primarily chooses gates which minimizes overall effect to the length of chains. 
-    # If there are many options having the same score, it secondarily tries to remove/avoid identity gates from the middle of chains.
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+def next_leg_to_remove(gadget_index, general_data):
+    """ Select next leg (edge+gate combination) to remove from gadget.
+    This can be also filling I in the middle of non-I legs."""
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
 
-    # find different option to remove qubit (edge)
+    # find different option to remove leg (edge in gadget graph)
     edge_options = []
     for q in range(num_qubits):
-        if pauligraph_degrees[gadget_index, q] == 1:
-            edge_options.append((q,int(last_edge[gadget_index,q])))
+        if gadget_graph_degrees[gadget_index, q] == 1:
+            edge_options.append((q,int(gadget_graph_last_edge[gadget_index,q])))
 
     # find possible gates for each edge option
     score = dict()
     edge_gates = []
     for qubit0,qubit1 in edge_options:
-        if gadget_data[qubit1,gadget_index] == 0b00: #swap needed
+        if gadget_data[qubit1,gadget_index] == 0b00: # Filling needed
             if gadget_data[qubit0,gadget_index] == 0b11: # We need to change Y to (Y or X): gate I,SV
                 gate0 = [apply_I, apply_sv]
             elif gadget_data[qubit0,gadget_index] == 0b01: # We need to change X to (Y or X): gate I, V
@@ -222,8 +211,9 @@ def next_edge_to_remove(gadget_index, general_data):
 
         for g0 in gate0:
             for g1 in gate1:
-                score[((qubit0,qubit1),g0,g1)] = 0
+                score[((qubit0,qubit1),g0,g1)] = (0,0)
 
+    # Score each edge+gate combination in terms of how much it helps to remove legs in other gadgets
     for gadget in range(num_gadgets):
         if removed_gadgets[gadget]:
             continue
@@ -237,50 +227,58 @@ def next_edge_to_remove(gadget_index, general_data):
                     new_pauli0, phase = gate0(pauli0)
                     new_pauli1, phase = gate1(pauli1)
                     new_pauli0, new_pauli1, phase = apply_cnot(new_pauli0, new_pauli1)
-                    score_change = get_score(general_data, gadget, qubit0, qubit1, new_pauli0, new_pauli1, pauli0, pauli1)
-                    score[(edge_options[e],gate0,gate1)] += score_change
+                    leg_change, middle_I_change = get_score(general_data, gadget, qubit0, qubit1, new_pauli0, new_pauli1, pauli0, pauli1)
+                    leg, middle_I = score[(edge_options[e],gate0,gate1)]
+                    score[(edge_options[e],gate0,gate1)] = (leg + leg_change, middle_I + middle_I_change)
 
+    # Select combination with minimum score (primary target is leg count, secondary middle I count)
     min_score = None
     for e in range(len(edge_options)):
         for gate0 in edge_gates[e][0]:
             for gate1 in edge_gates[e][1]:
-                if min_score is None or score[(edge_options[e],gate0,gate1)] < min_score:
+                if min_score is None or score[(edge_options[e],gate0,gate1)][0] < min_score[0]:
                     min_score = score[(edge_options[e],gate0,gate1)]
                     edge = edge_options[e]
                     gates = (gate0, gate1)
-    return edge, gates, min_score
+                elif score[(edge_options[e],gate0,gate1)][0] == min_score[0]:
+                    if score[(edge_options[e],gate0,gate1)][1] < min_score[1]:
+                        min_score = score[(edge_options[e],gate0,gate1)]
+                        edge = edge_options[e]
+                        gates = (gate0, gate1)
+    return edge, gates
 
 def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1, original_pauli0, original_pauli1):
-    # 10x more score if chain is extended/shortened
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
-    score = 0
+    """ Get score (leg change, middle I change) for given changes in pauli in given gadget and qubits."""
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
+    leg_change = 0
+    middle_I_change = 0
     if new_pauli0 != 0b00 and original_pauli0 == 0b00: # addition
-        if pauligraph_degrees[gadget_index,qubit0] == 0: # outside of chain, negative
-            score = 10
+        if gadget_graph_degrees[gadget_index,qubit0] == 0: # outside of chain, negative
+            leg_change = 1
         else:                                            # middle of chain, positive
-            score = -1
+            middle_I_change = -1
     if new_pauli1 != 0b00 and original_pauli1 == 0b00: # addition
-        if pauligraph_degrees[gadget_index,qubit1] == 0: # outside of chain, negative
-            score = 10
+        if gadget_graph_degrees[gadget_index,qubit1] == 0: # outside of chain, negative
+            leg_change = 1
         else:                                            # middle of chain, positive
-            score = -1
+            middle_I_change = -1
             pass
 
     if new_pauli0 == 0b00 and original_pauli0 != 0b00: # deletion
-        if pauligraph_degrees[gadget_index,qubit0] == 1: # end of chain, positive
-            score = -10
+        if gadget_graph_degrees[gadget_index,qubit0] == 1: # end of chain, positive
+            leg_change = -1
         else:                                            # middle of chain, negative
-            score = 1
+            middle_I_change = 1
     if new_pauli1 == 0b00 and original_pauli1 != 0b00: # deletion
-        if pauligraph_degrees[gadget_index,qubit1] == 1: # end of chain, positive
-            score = -10
+        if gadget_graph_degrees[gadget_index,qubit1] == 1: # end of chain, positive
+            leg_change = -1
         else:                                            # middle of chain, negative
-            score = 1
-    return score
+            middle_I_change = 1
+    return leg_change, middle_I_change
 
 def next_gadget(general_data):
-    """ Order non-removed gadgets. Primary sorting is done by number of nodes in steiner tree, secondary sorting by number of steiner nodes."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+    """ Select closest gadget."""
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     closest = -1
     num_closest = 0
@@ -288,8 +286,8 @@ def next_gadget(general_data):
     for i in range(num_gadgets):
         if removed_gadgets[i]:
             continue
-        s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
-        dist = nodes + (s_nodes * 2)
+        I_nodes, nodes = gadget_graph_size(gadget_data, gadget_graph_degrees, i)
+        dist = nodes + (I_nodes * 2)
         if dist < distance:
             distance = dist
             closest = i
@@ -298,22 +296,9 @@ def next_gadget(general_data):
             num_closest += 1
     return closest
 
-def node_levels_from_tree(tree_children, node, node_levels):
-    if tree_children[node] is None:
-        node_levels[node] = 0
-        return 0
-    max_level = 0
-    for n in tree_children[node]:
-        level = node_levels_from_tree(tree_children, n, node_levels)
-        if level>max_level:
-            max_level = level
-    node_levels[node] = max_level + 1
-    return max_level + 1
-
-
-def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, tree_graph):
+def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, device_topology):
     """apply single qubit gates and CNOT to all non-removed gates."""
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     qc_out, qc_prop = circ_data
     num_qubits, num_gadgets = gadget_data.shape
 
@@ -366,7 +351,7 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
         pauli1, pauli2, phase_change = apply_cnot(pauli1, pauli2)
         phase *= phase_change
 
-        gadget_removed = update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2, tree_graph)
+        gadget_removed = update_gadget_graph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2, device_topology)
         gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = pauli1, pauli2
         gadget_angles[gadget_index] *= phase
 
@@ -381,67 +366,64 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
             gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index] = 0b00, 0b00
     return removed_gadgets_num
 
-def update_pauligraph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2, tree_graph):
-    gadget_data, gadget_angles, removed_gadgets, pauligraph_degrees, last_edge = general_data
-    num_qubits, num_gadgets = gadget_data.shape
+def update_gadget_graph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2, device_topology):
+    gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
 
     original_pauli1, original_pauli2 = gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index]
     if pauli1 != 0b00 and original_pauli1 == 0b00: # addition
-        if pauligraph_degrees[gadget_index,qubit1] == 0: # outside of chain, negative
-            pauligraph_degrees[gadget_index,qubit1] += 1
-            pauligraph_degrees[gadget_index,qubit2] += 1
-            last_edge[gadget_index,qubit1] = qubit2
+        if gadget_graph_degrees[gadget_index,qubit1] == 0: # outside of chain, negative
+            gadget_graph_degrees[gadget_index,qubit1] += 1
+            gadget_graph_degrees[gadget_index,qubit2] += 1
+            gadget_graph_last_edge[gadget_index,qubit1] = qubit2
         else:                                            # middle of chain, positive
             pass
     if pauli2 != 0b00 and original_pauli2 == 0b00: # addition
-        if pauligraph_degrees[gadget_index,qubit2] == 0: # outside of chain, negative
-            pauligraph_degrees[gadget_index,qubit1] += 1
-            pauligraph_degrees[gadget_index,qubit2] += 1
-            last_edge[gadget_index,qubit2] = qubit1
+        if gadget_graph_degrees[gadget_index,qubit2] == 0: # outside of chain, negative
+            gadget_graph_degrees[gadget_index,qubit1] += 1
+            gadget_graph_degrees[gadget_index,qubit2] += 1
+            gadget_graph_last_edge[gadget_index,qubit2] = qubit1
         else:                                            # middle of chain, positive
             pass
 
     if pauli1 == 0b00 and original_pauli1 != 0b00: # deletion
-        if pauligraph_degrees[gadget_index,qubit1] == 1: # end of chain, positive
-            pauligraph_degrees[gadget_index,qubit1] -= 1
-            pauligraph_degrees[gadget_index,qubit2] -= 1
-            if pauligraph_degrees[gadget_index,qubit2] == 1:
-                last_edge[gadget_index,qubit2] = find_last_edge(gadget_index, qubit2, pauligraph_degrees, tree_graph)
+        if gadget_graph_degrees[gadget_index,qubit1] == 1: # end of chain, positive
+            gadget_graph_degrees[gadget_index,qubit1] -= 1
+            gadget_graph_degrees[gadget_index,qubit2] -= 1
+            if gadget_graph_degrees[gadget_index,qubit2] == 1:
+                gadget_graph_last_edge[gadget_index,qubit2] = find_edge(gadget_index, qubit2, gadget_graph_degrees, device_topology)
         else:                                            # middle of chain, negative
             pass
     if pauli2 == 0b00 and original_pauli2 != 0b00: # deletion
-        if pauligraph_degrees[gadget_index,qubit2] == 1: # end of chain, positive
-            pauligraph_degrees[gadget_index,qubit1] -= 1
-            pauligraph_degrees[gadget_index,qubit2] -= 1
-            if pauligraph_degrees[gadget_index,qubit1] == 1:
-                last_edge[gadget_index,qubit1] = find_last_edge(gadget_index, qubit1, pauligraph_degrees, tree_graph)
+        if gadget_graph_degrees[gadget_index,qubit2] == 1: # end of chain, positive
+            gadget_graph_degrees[gadget_index,qubit1] -= 1
+            gadget_graph_degrees[gadget_index,qubit2] -= 1
+            if gadget_graph_degrees[gadget_index,qubit1] == 1:
+                gadget_graph_last_edge[gadget_index,qubit1] = find_edge(gadget_index, qubit1, gadget_graph_degrees, device_topology)
         else:                                            # middle of chain, negative
             pass
-    return (pauligraph_degrees[gadget_index,qubit1] == 0) and (pauligraph_degrees[gadget_index,qubit2] == 0)
+    return (gadget_graph_degrees[gadget_index,qubit1] == 0) and (gadget_graph_degrees[gadget_index,qubit2] == 0)
 
-def find_last_edge(gadget_index, qubit, pauligraph_degrees, tree_graph):
-    for neighbor in tree_graph.neighbors(qubit):
-        if pauligraph_degrees[gadget_index, neighbor] != 0:
+def find_edge(gadget_index, qubit, gadget_graph_degrees, device_topology):
+    """ Find last edge connected to the qubit in gadget graph."""
+    for neighbor in device_topology.neighbors(qubit):
+        if gadget_graph_degrees[gadget_index, neighbor] != 0:
             return neighbor
     print('ERROR: could not find last edge')
     print('gadget index:', gadget_index)
     print('qubit:', qubit)
-    print('gadget degrees:', pauligraph_degrees[gadget_index])
+    print('gadget degrees:', gadget_graph_degrees[gadget_index])
     input()
     return -1
 
-def mapping_tree(gadget_data, topo, tree, gadget_index):
-    num_qubits, num_gadgets = gadget_data.shape
+def map_gadget_as_tree(gadget_data, tree, gadget_index):
+    """ Map gadget as tree graph by removing nodes which are not part of the gadget."""
     root, tree_children = tree
     nodes_removed = []
     edges = []
     remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_removed, edges)
     remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed,edges)
     collect_edges(tree_children, root, nodes_removed, edges)
-
-    G = nx.Graph(edges)
-
-    return G
+    return nx.Graph(edges)
 
 def collect_edges(tree_children, root, nodes_removed, edges):
     if tree_children[root] is None:
@@ -484,18 +466,17 @@ def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes
         nodes_removed.append(root)
         remove_nodes_from_root(gadget_data, gadget_index, tree_children, branch, nodes_removed, edges)
 
-def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
-    """ Defines number of steiner nodes and regular nodes of steiner tree (pauligraph data)"""
+def gadget_graph_size(gadget_data, gadget_graph_degrees, gadget_index):
+    """ Defines number of middle I nodes and regular nodes of gadget graph."""
     num_qubits = gadget_data.shape[0]
     nodes = 0
-    steiner_nodes = 0
+    I_nodes = 0
     for i in range(num_qubits):
         if gadget_data[i, gadget_index] != 0b00:
             nodes += 1
-        elif pauligraph_degrees[gadget_index, i] > 0:
-            steiner_nodes += 1
-    return steiner_nodes, nodes
-
+        elif gadget_graph_degrees[gadget_index, i] > 0:
+            I_nodes += 1
+    return I_nodes, nodes
 
 def apply_v(p): # z,z xor x
     phase = 1
@@ -543,7 +524,6 @@ def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     circ = circ_out.to_qiskit()
     pp_circ = pp2.to_qiskit()
     return verify_equality(pp_circ,circ)
-
 
 def print_sorted_gd(gadget_data, order=None):
     num_qubits, num_gadgets = gadget_data.shape

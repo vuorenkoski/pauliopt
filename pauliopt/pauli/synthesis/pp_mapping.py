@@ -9,7 +9,7 @@ import random, time
 def pauli_tree_mapping(pp: PauliPolynomial, topo: Topology):
     # This mapping gives weghts to edges according to the how many paulis have both these legs
     # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit.
-    # Difference to forest: I-index is the same, but finding optimal mappings after initial is little bit different.
+    # Connections are made as a tree structure.
     weights = edges_by_I_index(pp)
     mapping, tree = map_qubits_as_tree(weights, pp, topo)
     return mapping, tree
