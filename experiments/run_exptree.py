@@ -4,12 +4,12 @@ import pandas as pd
 import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
-from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_tree import pauli_polynomial_dynamic_ordering_tree
+from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_tree_bit import pauli_polynomial_dynamic_ordering_tree_bit
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_treem import pauli_polynomial_dynamic_ordering_treem
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_treem2 import pauli_polynomial_dynamic_ordering_treem2
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis_leg import pauli_polynomial_dynamic_ordering_leg
-from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping
+from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping, complete_tree
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
@@ -17,7 +17,8 @@ from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth
 from experiments.utils import create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
 from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth, map_topology
-from experiments.utils import print_brisbane_mapping, print_brisbane_topo, map_tree, create_complete_pauli_polynomial
+from experiments.utils import print_brisbane_mapping, map_tree, create_complete_pauli_polynomial
+from experiments.utils import print_grid25_mapping, print_brisbane_topo
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
@@ -144,10 +145,14 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
             pp = simplify_pauli_polynomial(pp, allow_acs=True)
             mapping_time = time.time()
             map, tree = mapping_method(pp, topo)
+            map_r = random_mapping(topo)
+            tree_r = complete_tree(topo)
+#            print_grid25_mapping(map, tree)
+#            print_grid25_mapping(map_r, tree_r)
             mapping_time = int((time.time() - mapping_time) * 1000)
 #            print(topo_m)
             pp_m = permute_with_mapping(map, pp, topo.num_qubits)
-            pp_r = permute_with_mapping(random_mapping(topo), pp, topo.num_qubits)
+            pp_r = permute_with_mapping(map_r, pp, topo.num_qubits)
 
             for synth_method in methods:
                 start = time.time()
@@ -169,7 +174,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                 df.loc[len(df)] = column
                 
                 start = time.time()
-                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo, tree)
+                circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo, tree_r)
                 if verify:
                     correct = check_circuit_equivalence(pp_r.copy(), circ_out, gadget_perm, perm)
                     if not correct:
@@ -363,7 +368,7 @@ def test_random_gadget_ordering(pp, backend, mapping, tree,synth_method, rounds=
 
 
 if __name__ == "__main__":
-    methods = [pauli_polynomial_dynamic_ordering_tree, pauli_polynomial_steiner_gray_clifford]
+    methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
 #    methods = [pauli_polynomial_dynamic_ordering_treem2, pauli_polynomial_dynamic_ordering_tree]
     verify = False
     mapping_method = pauli_tree_mapping
@@ -375,7 +380,7 @@ if __name__ == "__main__":
 #    steps = list(range(20, 220, 20)) + list(range(200, 2000, 100))
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 9}
+    backend = {'name': 'grid', 'qubits': 25}
 #    backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
@@ -399,7 +404,7 @@ if __name__ == "__main__":
     seed = 42
     random.seed(seed)
     gadgets = 80
-    synth_method = pauli_polynomial_dynamic_ordering_treem2
+    synth_method = shortest_path_pauli_forest
     backend = {'name': 'line', 'qubits': 3}
 #    backend = {'name': 'grid', 'qubits': 9}
 #    backend = {'name': 'brisbane', 'qubits': 127}

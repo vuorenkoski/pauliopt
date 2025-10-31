@@ -90,12 +90,10 @@ def floydWarshall(graph):
                     g[i][j] = g[i][k] + g[k][j]
     return g
 
-def create_random_phase_gadget(
-        num_qubits, min_legs, max_legs, allowed_angels, allowed_legs=None, empty_qubits=0
-):
+def create_random_phase_gadget(num_qubits, min_legs, max_legs, allowed_angles, allowed_legs=None, empty_qubits=0):
     if allowed_legs is None:
         allowed_legs = [X, Y, Z]
-    angle = random.choice(allowed_angels)
+    angle = random.choice(allowed_angles)
     nr_legs = random.randint(min_legs, max_legs)
     legs = random.choices(
         [i for i in range(num_qubits-empty_qubits)], k=nr_legs)
@@ -105,24 +103,47 @@ def create_random_phase_gadget(
     return PPhase(angle) @ phase_gadget
 
 
-def create_random_pauli_polynomial(
-        num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angels=None, seed=None, empty_qubits=0, allowed_legs=[X, Y, Z]
-):
+def create_random_pauli_polynomial(num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angles=None, seed=None, empty_qubits=0, allowed_legs=[X, Y, Z]):
     if min_legs is None:
         min_legs = 1
     if max_legs is None:
         max_legs = num_qubits - empty_qubits
-    if allowed_angels is None:
-        allowed_angels = [pi, pi / 2, pi / 4, pi / 8, pi / 16]
+    if allowed_angles is None:
+        allowed_angles = [pi, pi / 2, pi / 4, pi / 8, pi / 16]
 
     if seed is not None:
         random.seed(seed)
     pp = PauliPolynomial(num_qubits)
     for _ in range(num_gadgets):
-        pp >>= create_random_phase_gadget(
-            num_qubits, min_legs, max_legs, allowed_angels, empty_qubits=empty_qubits, allowed_legs=allowed_legs
-        )
+        pp >>= create_random_phase_gadget(num_qubits, min_legs, max_legs, allowed_angles, empty_qubits=empty_qubits, allowed_legs=allowed_legs)
 
+    return pp
+
+def create_complete_pauli_polynomial_r(num_qubits: int, allowed_legs=[X, Y, Z]):
+    if num_qubits == 1:
+        pstrings = []
+        pstrings.append([I])
+        for leg in allowed_legs:
+            pstrings.append([leg])
+        return pstrings
+    else:
+        pstrings = []
+        smaller_pp = create_complete_pauli_polynomial_r(num_qubits - 1, allowed_legs)
+        for pstring in smaller_pp:
+            pstrings.append(pstring + [I])
+            for leg in allowed_legs:
+                pstrings.append(pstring + [leg])
+        return pstrings
+
+def create_complete_pauli_polynomial(num_qubits: int, allowed_legs=[X, Y, Z]):
+    allowed_angles = [pi, pi / 2, pi / 4, pi / 8, pi / 16]
+    pps = create_complete_pauli_polynomial_r(num_qubits, allowed_legs)
+    pp = PauliPolynomial(num_qubits)
+    for pstring in pps:
+        if pstring.count(I) < num_qubits-1:
+            angle = random.choice(allowed_angles)
+            gadget = PauliGadget(angle, pstring)
+            pp.pauli_gadgets.append(gadget)
     return pp
 
 def find_square_dimensions(n):
@@ -388,11 +409,8 @@ def order_gadgets(pp, topo):
     order = []
     for i in range(pp.num_gadgets):
         s_nodes, nodes = steiner_nodes(gadget_data, pauligraph_degrees, i)
-        for q in range(pp.num_qubits):
-            if gadget_data[q,i] != 0b00:
-                h_node = q
-        order.append((i, s_nodes, nodes+s_nodes, h_node))
-    order.sort(key=lambda x: (x[2], x[1], x[3],x[0]))
+        order.append((i, nodes + (s_nodes*2)))
+    order.sort(key=lambda x: (x[1]))
     return [i[0] for i in order]
 
 def steiner_nodes(gadget_data, pauligraph_degrees, gadget_index):
@@ -421,6 +439,101 @@ brisbane = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,-1,
 94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,
 -1,-1,109,-1,-1,-1,110,-1,-1,-1,111,-1,-1,-1,112,
 -1,113,114,115,116,117,118,119,120,121,122,123,124,125,126]
+
+def print_grid16_mapping(mapping, tree):
+    root, tree_children = tree
+    parent = {root: None}
+    for i in tree_children:
+        children = tree_children[i]
+        if children is not None:
+            for c in children:
+                parent[c] = i
+    for i in range(4):
+        for j in range(4):
+            if i*4+j == root:
+                print('X', end='')
+            elif i*4+j in mapping:
+                up = down = left = right = False
+                neighbours = [parent[i*4+j]]
+                if tree_children[i*4+j] is not None:
+                    neighbours += tree_children[i*4+j]
+                if (i-1)*4+j in neighbours:
+                    up = True
+                if (i+1)*4+j in neighbours:
+                    down = True
+                if i*4+j-1 in neighbours:
+                    left = True
+                if i*4+j+1 in neighbours:
+                    right = True
+                line_char(up, down, left, right)
+            else:
+                print('.', end='')
+        print()
+    print()
+
+def print_grid25_mapping(mapping, tree):
+    size = 5
+    root, tree_children = tree
+    parent = {root: None}
+    for i in tree_children:
+        children = tree_children[i]
+        if children is not None:
+            for c in children:
+                parent[c] = i
+    for i in range(size):
+        for j in range(size):
+            if i*size+j == root:
+                print('X', end='')
+            elif i*size+j in mapping:
+                up = down = left = right = False
+                neighbours = [parent[i*size+j]]
+                if tree_children[i*size+j] is not None:
+                    neighbours += tree_children[i*size+j]
+                if (i-1)*size+j in neighbours:
+                    up = True
+                if (i+1)*size+j in neighbours:
+                    down = True
+                if i*size+j-1 in neighbours:
+                    left = True
+                if i*size+j+1 in neighbours:
+                    right = True
+                line_char(up, down, left, right)
+            else:
+                print(chr(183), end='')
+        print()
+    print()
+
+def line_char(up, down, left, right):
+    if (up and down and left and right):
+        print('┼', end='')
+    elif (up and down and right):
+        print('├', end='')
+    elif (up and down and left):
+        print('┤', end='')
+    elif (left and right and up):
+        print('┴', end='')
+    elif (left and right and down):
+        print('┬', end='')
+    elif (up and down):
+        print('|', end='')
+    elif (left and right):
+        print('─', end='')
+    elif (up and right):
+        print('└', end='')
+    elif (up and left):
+        print('┘', end='')
+    elif (down and right):
+        print('┌', end='')
+    elif (down and left):
+        print('┐', end='')
+    elif up:
+        print('╵', end='')
+    elif down:
+        print('╷', end='')
+    elif left:
+        print('╴', end='')
+    elif right:
+        print('╶', end='')
 
 def print_brisbane_mapping(mapping, tree):
     if tree is not None:

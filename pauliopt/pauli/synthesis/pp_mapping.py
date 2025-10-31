@@ -7,9 +7,9 @@ import random, time
 # have most common legs with mapped logical qubit when new logical qubit would be placed as a neighbour of mapped logical qubit.
 
 def pauli_tree_mapping(pp: PauliPolynomial, topo: Topology):
-    # This mapping gives weghts to edges according to the how many paulis have both these legs
-    # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit.
-    # Connections are made as a tree structure.
+    # This mapping gives weights to edges according to the how many paulis have both these legs
+    # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical 
+    # qubit which have most common non-I legs with mapped qubit. Connections are made as a tree structure.
     weights = edges_by_I_index(pp)
     mapping, tree = map_qubits_as_tree(weights, pp, topo)
     return mapping, tree
@@ -435,6 +435,7 @@ def map_qubits_as_tree(correlations, pp, topo):
     while len(mapped_logical_qubits) < num_logical_qubits:
         # find possible next physical qubits by these criteria:
         #  - Non-mapped qubit is neighbour of mapped physical qubit
+        #  - Of these select ones which has smallest leaf depth (distance to root)
         #  - Of these select those that have max free degree.
         # Select many if there are qual options
         npq = []
@@ -516,15 +517,17 @@ def map_qubits_as_tree(correlations, pp, topo):
             tree_children[pq] = None
 
     tree = (root, tree_children)
-#    print(tree)
     return mapping, tree
 
 def center_physical_qubit(topo):
-    # Find group of qubits having maximum degree, and degree of 1
+    """ Find qubit having max degree and max distance to the closest edge"""
     num_physical_qubits = topo.num_qubits
 
+    # Find group of qubits having maximum degree, and group of qubits having degree of 1
     max_degree = 0
+    min_degree = -1
     max_degree_qubits = []
+    min_degree_qubits = []
     one_degree_qubits = []
     for i in range(num_physical_qubits):
         degree = 0
@@ -538,16 +541,21 @@ def center_physical_qubit(topo):
             max_degree_qubits.append(i)
         if degree == 1:
             one_degree_qubits.append(i)
+        if min_degree == -1 or degree < min_degree:
+            min_degree = degree
+            min_degree_qubits = [i]
+        elif degree == min_degree:
+            min_degree_qubits.append(i)
 
-    if len(one_degree_qubits) == 0:
-        return max_degree_qubits[0]  # If topology is circular
-
-    # find qubit which distance to closest qubit is greatest
+#    if len(one_degree_qubits) == 0:
+#        return max_degree_qubits[0]  # If topology is circular
+    
+    # find qubit which distance to closest degree 1 qubit is greatest
     max_distance_to_edge = -1
     max_distance_qubit = -1
     for q1 in max_degree_qubits:
         min_distance_to_edge = -1
-        for q2 in one_degree_qubits:
+        for q2 in min_degree_qubits:
             dist = topo.dist(q1, q2)
             if min_distance_to_edge == -1 or dist < min_distance_to_edge:
                 min_distance_to_edge = dist
@@ -776,3 +784,72 @@ def random_sample(first, last):
     random.shuffle(arr)
     return arr
 
+def complete_tree(topo):
+    num_physical_qubits = topo.num_qubits
+    mapped_physical_qubits = []
+    mapped_physical_qubit_depth = {}
+    edges = []
+
+    # Map this qubit to the center of graph
+    center = center_physical_qubit(topo)
+    mapped_physical_qubits.append(center)
+    mapped_physical_qubit_depth[center] = 0
+
+    while len(mapped_physical_qubits) < num_physical_qubits:
+        pair = None
+        min_leaf_depth = num_physical_qubits
+        max_free_degree = -1
+        for nmpq in range(num_physical_qubits):
+
+            # Check that qubit is not mapped
+            if nmpq in mapped_physical_qubits:
+                continue
+
+            # Check that qubit is neighbour of mapped physical qubit
+            neighbour = -1
+            for mpq in mapped_physical_qubits:
+                if topo.dist(mpq, nmpq) == 1:
+                    neighbour = mpq
+                    break
+            if neighbour == -1:
+                continue
+
+            # Leaf depth
+            leaf_depth = mapped_physical_qubit_depth[neighbour]
+
+            # count connection to non-mapped physical qubits
+            free_degree = 0
+            for i in range(num_physical_qubits):  
+                if topo.dist(nmpq,i) == 1 and i not in mapped_physical_qubits:
+                    free_degree += 1
+
+            # compare options
+            if leaf_depth < min_leaf_depth:
+                min_leaf_depth = leaf_depth
+                pair = (neighbour, nmpq)
+                max_free_degree = free_degree
+            elif leaf_depth == min_leaf_depth and free_degree > max_free_degree:
+                pair = (neighbour, nmpq)
+                min_leaf_depth = leaf_depth
+                max_free_degree = free_degree
+    
+
+        # Make mapping
+        mapped_physical_qubits.append(pair[1])
+        edges.append(pair)
+        mapped_physical_qubit_depth[pair[1]] = 1 + mapped_physical_qubit_depth[pair[0]]
+
+    root = center
+    tree_children = {}
+    for edge in edges:
+        if edge[0] in tree_children:
+            tree_children[edge[0]].append(edge[1])
+        else:
+            tree_children[edge[0]] = [edge[1]]
+
+    for pq in mapped_physical_qubits:
+        if pq not in tree_children:
+            tree_children[pq] = None
+
+    tree = (root, tree_children)
+    return tree

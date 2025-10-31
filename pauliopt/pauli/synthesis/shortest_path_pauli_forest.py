@@ -22,13 +22,12 @@ from tests.pauli.utils import verify_equality
 # Topology of the target device is fitted to a tree. This tree must be provided for the algorithm. Every gadget
 # is fitted to this tree.
 
-def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
+def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
     num_gadgets = len(pp.pauli_gadgets)
     qc_out = Circuit(num_qubits)
     qc_prop = []
     perm_gadgets = []
-
     # Create algorithm datastructures
     last_leg = np.zeros((num_qubits), dtype=int) # Last leg of gadget before removal (for analysis)
     gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Matrix representing current status of paulipolynomial 
@@ -54,7 +53,6 @@ def pauli_polynomial_dynamic_ordering_tree(pp: PauliPolynomial, topo: Topology, 
     device_topology = topology_from_tree(gadget_data, tree)
     general_data = (gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge)
     circ_data = (qc_out, qc_prop)
-
     debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
 
@@ -114,8 +112,9 @@ def topology_from_tree(gadget_data, tree):
     root, tree_children = tree
     edges = []
     for i in range(num_qubits):
-        for j in tree_children[i] or []:
-            edges.append((i,j))
+        if i in tree_children:
+            for j in tree_children[i] or []:
+                edges.append((i,j))
     G = nx.Graph(edges)
     return G
 
@@ -181,7 +180,11 @@ def next_leg_to_remove(gadget_index, general_data):
     for q in range(num_qubits):
         if gadget_graph_degrees[gadget_index, q] == 1:
             edge_options.append((q,int(gadget_graph_last_edge[gadget_index,q])))
-
+    if len(edge_options) == 0:
+        print('ERROR: no edge options found for gadget:', gadget_index)
+        print(gadget_graph_degrees[gadget_index])
+        print_sorted_gd(gadget_data)
+        input()
     # find possible gates for each edge option
     score = dict()
     edge_gates = []
