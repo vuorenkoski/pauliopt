@@ -8,15 +8,15 @@ dfnm = df[df.method == 'pauliopt_steiner_gray']
 #dfm = dfm.drop(columns=['method']).rename(columns={'time': 'mtime', 'cx': 'mcx'})
 #dfnm = dfnm.drop(columns=['method']).rename(columns={'ntime': 'nmtime', 'cx': 'mcx'})
 df = pd.merge(dfm, dfnm, on=['name', 'backend'], how='outer')
-df = df.drop(columns=['num_qubits_y', 'n_gadgets_y', 'method_x', 'method_y'], axis=1)
-df['cx diff %'] = (df['cx_x'] / df['cx_y']-1)*100
+df = df.drop(columns=['num_qubits_y', 'n_gadgets_y', 'method_x', 'method_y','cx_x','cx_y'], axis=1)
+df['cx diff %'] = (df['cx-depth_x'] / df['cx-depth_y']-1)*100
 df['time diff %'] = (df['time_x'] / df['time_y']-1)*100
 df = df.round({'cx diff %':2, 'time diff %':2, 'time_x':2, 'time_y':2})
 df = df.rename(columns={
     'num_qubits_x': 'num_qubits',
     'n_gadgets_x': 'n_gadgets',
-    'cx_y': 'cx lo',
-    'cx_x': 'cx sp',
+    'cx-depth_y': 'cx lo',
+    'cx-depth_x': 'cx sp',
     'time_y': 'time lo',
     'time_x': 'time sp',
 })

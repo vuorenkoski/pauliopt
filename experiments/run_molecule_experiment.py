@@ -8,11 +8,12 @@ import tqdm
 import pandas as pd
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
-from pauliopt.pauli.synthesis.dynamic_ordering_synthesis import pauli_polynomial_dynamic_ordering
-from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping
+from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
+
+from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping, complete_tree
 from pauliopt.topologies import Topology
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
-from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping
+from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping, cnot_depth
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I
 from pauliopt.pauli.pauli_gadget import PauliGadget
 from pauliopt.utils import AngleVar
@@ -46,6 +47,7 @@ def create_csv_header_real_hw():
         "n_gadgets",
         "method",
         "cx",
+        "cx-depth",
         "time",
     ]
     return header
@@ -112,24 +114,19 @@ def get_lock(new_lock):
 
 def synth_pp_pauliopt_steiner_gray(pp: PauliPolynomial, topo: Topology):
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp, topo)
-    return {'cx': cnot_count(circ_out)} | benchmarks 
+    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp, topo, None)
+    return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks
 
-def synth_pp_dynamic_ordering(pp: PauliPolynomial, topo: Topology):
+def synth_pp_shortest_path_mapping(pp: PauliPolynomial, topo: Topology):
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp, topo)
-    return {'cx': cnot_count(circ_out)} | benchmarks 
-
-def synth_pp_dynamic_ordering_mapping(pp: PauliPolynomial, topo: Topology):
-    pp = simplify_pauli_polynomial(pp, allow_acs=True)
-    pp = permute_with_mapping(I_index_mapping(pp, topo), pp, topo.num_qubits)
-    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_dynamic_ordering(pp, topo)
-    return {'cx': cnot_count(circ_out)} | benchmarks 
+    mapping, tree = pauli_tree_mapping(pp, topo)
+    pp_m = permute_with_mapping(mapping, pp, topo.num_qubits)
+    circ_out, gadget_perm, perm, benchmarks = shortest_path_pauli_forest(pp_m, topo, tree)
+    return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 
 
 SYNTHESIS_METHODS = {
     "pauliopt_steiner_gray": synth_pp_pauliopt_steiner_gray,
-    "dynamic_ordering_synthesis": synth_pp_dynamic_ordering,
-    "dynamic_ordering_synthesis_mapping": synth_pp_dynamic_ordering_mapping,
+    "shortest_path_synthesis": synth_pp_shortest_path_mapping,
 }
 
 def threaded_real_hw_ucc_evaluation(max_qubits=30):

@@ -14,13 +14,15 @@ from tests.pauli.utils import verify_equality
 # Distance of gadgets is measured by number of cnots needed to resolve the gadget. Gadget can be resolved
 # by many different paths. A path is composed from steps. In each step cnot is applied in addition to
 # single qubit gates. Single qubit gate for control is either I, V or S+V and for target V, S or V+S.
+# S = sqrt(Z), V = sqrt(X)
 
 # Path is formed step by step, so that each step removes one leg from gadget, or appends non-I leg  
 # where I is in the middle of non-I legs. From multiple step choices, one is selected which brings
 # non-resolved gadgets closer (removes legs in endings, or adds non-I leg to the middle)
 
-# Topology of the target device is fitted to a tree. This tree must be provided for the algorithm. Every gadget
-# is fitted to this tree.
+# Topology of the target device is fitted to a tree, so we usually all connections of device is not used. 
+# This tree must be provided for the algorithm. Every gadget is fitted to this tree and legs are removed 
+# from edges of that graph
 
 def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
@@ -28,6 +30,7 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
     qc_out = Circuit(num_qubits)
     qc_prop = []
     perm_gadgets = []
+
     # Create algorithm datastructures
     last_leg = np.zeros((num_qubits), dtype=int) # Last leg of gadget before removal (for analysis)
     gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Matrix representing current status of paulipolynomial 
@@ -56,7 +59,7 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
     debug and print('---------------------Initial gadget data')
     debug and print_sorted_gd(gadget_data, order=print_order)
 
-    # Remove possible gadgets having one leg
+    # Remove possible gadgets having initially one leg
     removed_gadgets_num = check_for_singles(general_data, circ_data, perm_gadgets, last_leg)
     debug and print_sorted_gd(gadget_data, order=print_order)
 
@@ -85,6 +88,8 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
                 num_legs -= 1
             debug and print_sorted_gd(gadget_data, order=print_order)
             debug and input()
+
+    # Post processing
 
     # do clifford synthesis for the second part of the created circuit
     qc_prop_r = list(reversed(qc_prop))
