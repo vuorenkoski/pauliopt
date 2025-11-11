@@ -425,54 +425,64 @@ def find_edge(gadget_index, qubit, gadget_graph_degrees, device_topology):
 
 def map_gadget_as_tree(gadget_data, tree, gadget_index):
     """ Map gadget as tree graph by removing nodes which are not part of the gadget."""
+    """ Time complexity O(n)"""
     root, tree_children = tree
-    nodes_removed = []
+    nodes_to_remove = [] # Nodes which can be removed from tree
+    remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_to_remove)
+    remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_to_remove)
     edges = []
-    remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_removed, edges)
-    remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed,edges)
-    collect_edges(tree_children, root, nodes_removed, edges)
+    list_edges(tree_children, root, nodes_to_remove, edges)
     return nx.Graph(edges)
 
-def collect_edges(tree_children, root, nodes_removed, edges):
-    if tree_children[root] is None:
-        return
-    for node in tree_children[root]:
-        if node not in nodes_removed:
-            if root not in nodes_removed:
-                edges.append((root, node))
-        collect_edges(tree_children, node, nodes_removed, edges)
-
-def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
+def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_to_remove):
+    """ Recursive check from leafs to root which branches can be removed."""
+    """ Time complexity O(n)"""
+    # If there is no children and node is I, it can be removed
     if tree_children[root] is None:
         if gadget_data[root,gadget_index] == 0b00:
-            nodes_removed.append(root)
+            nodes_to_remove.append(root)
             return True
         else:
             return False
+    # Check all children, if all are removable and node is I, it can be removed
     non_removable_branches = 0
     for node in tree_children[root]:
-        removable = remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, node, nodes_removed, edges)
+        removable = remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, node, nodes_to_remove)
         if not removable:
             non_removable_branches += 1
     if non_removable_branches == 0 and gadget_data[root,gadget_index] == 0b00:
-        nodes_removed.append(root)
-        return True 
+        nodes_to_remove.append(root)
+        return True
     return False
 
-def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_removed, edges):
-    if tree_children[root] is None:
+def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_to_remove):
+    """ Recursively check if root node can be removed due to fact that it has only single branch."""
+    """ Time complexity O(n)"""
+    # If there is no children and node is I do nothing
+    if tree_children[root] is None or gadget_data[root,gadget_index] != 0b00:
         return
-    if gadget_data[root,gadget_index] != 0b00:
-        return
+    
+    # For all children of a node, check if only single branch is left after removals. If so, remove this node too
     branches_left = 0
     branch = -1
     for node in tree_children[root]:
-        if node not in nodes_removed:
+        if node not in nodes_to_remove:
             branches_left += 1
             branch = node
     if branches_left == 1:
-        nodes_removed.append(root)
-        remove_nodes_from_root(gadget_data, gadget_index, tree_children, branch, nodes_removed, edges)
+        nodes_to_remove.append(root)
+        remove_nodes_from_root(gadget_data, gadget_index, tree_children, branch, nodes_to_remove)
+
+def list_edges(tree_children, root, nodes_to_remove, edges):
+    """ List edges from tree excluding removed nodes."""
+    """ Time complexity O(n)"""
+    if tree_children[root] is None:
+        return
+    for node in tree_children[root]:
+        if node not in nodes_to_remove:
+            if root not in nodes_to_remove:
+                edges.append((root, node))
+        list_edges(tree_children, node, nodes_to_remove, edges)
 
 def gadget_graph_size(gadget_data, gadget_graph_degrees, gadget_index):
     """ Defines number of middle I nodes and regular nodes of gadget graph."""

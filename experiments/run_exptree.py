@@ -393,9 +393,9 @@ if __name__ == "__main__":
     
 #    print_brisbane_topo()
 #    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, 
-                           allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-    input()
+#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, 
+#                           allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
+#    input()
 
 
     #
@@ -406,12 +406,12 @@ if __name__ == "__main__":
     gadgets = 80
     synth_method = shortest_path_pauli_forest
     backend = {'name': 'line', 'qubits': 3}
-#    backend = {'name': 'grid', 'qubits': 9}
+    backend = {'name': 'grid', 'qubits': 25}
 #    backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 3
+    logical_qubits = 9
     random.seed(seed)
     pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0, allowed_legs=[Z,X,Y])
-    pp = create_complete_pauli_polynomial(backend['qubits'], allowed_legs=[Z,X,Y])
+#    pp = create_complete_pauli_polynomial(backend['qubits'], allowed_legs=[Z,X,Y])
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
     print('native paulis')
     print('gadgets after simplification:', len(pp.pauli_gadgets))
@@ -419,8 +419,8 @@ if __name__ == "__main__":
 
     topo = get_topo(backend['name'], backend['qubits'])
 #    synth_method = pauli_polynomial_steiner_gray_clifford
-#    mapping = mapping_method(pp, topo)
     mapping, tree = pauli_tree_mapping(pp, topo) # mapping produces 112 with 80,42
+    print_grid25_mapping(mapping, tree)
     print('algorithm mapping', qubit_order(mapping))
     print('tree', tree)
 #    mapping = get_mapping_from_order([1, 2, 0, 4, 3, 5]) # best with 80,42: pre-cx 100

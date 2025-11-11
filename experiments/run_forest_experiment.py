@@ -1,4 +1,4 @@
-import random, time, itertools, sys
+import random, time
 import pandas as pd
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
@@ -8,8 +8,8 @@ from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
-from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth
-from experiments.utils import create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
+from experiments.utils import permute_with_mapping, random_mapping, cnot_depth
+from experiments.utils import create_random_pauli_polynomial, order_gadgets
 from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth, map_topology
 from experiments.utils import print_brisbane_mapping, map_tree, create_complete_pauli_polynomial
 from experiments.utils import print_grid25_mapping
