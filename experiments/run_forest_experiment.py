@@ -3,6 +3,7 @@ import pandas as pd
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
+from pauliopt.pauli.synthesis.dynamic_ordering_synthesis import pauli_polynomial_dynamic_ordering
 from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping, complete_tree
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
@@ -38,6 +39,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
     print('Random iterations:', rounds)
     print('Mapping method:', mapping_method.__name__)
     print('Synthesis methods:', [m.__name__ for m in methods])
+    print('Baseline method:', methods[1].__name__)
     print('Verifying:', verify)
     df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','cx_depth','time','pre-cx'])
     if not steps:
@@ -113,18 +115,21 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
 
 
 if __name__ == "__main__":
+    # In comparison, baseline is the second method
     methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
+#    methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
+#    methods = [shortest_path_pauli_forest, pauli_polynomial_dynamic_ordering]
     verify = False
     mapping_method = pauli_tree_mapping
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
-#    backend = {'name': 'grid', 'qubits': 25}
-    backend = {'name': 'line', 'qubits': 6}
+    backend = {'name': 'grid', 'qubits': 16}
+#    backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 6
+    logical_qubits = 16
     samples = 200
     max_legs = None
     
