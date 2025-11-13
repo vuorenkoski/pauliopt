@@ -1,7 +1,5 @@
-from tabnanny import verbose
 import random, time, itertools, sys
 import pandas as pd
-import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest

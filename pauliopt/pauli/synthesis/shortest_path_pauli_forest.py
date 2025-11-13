@@ -24,6 +24,9 @@ from tests.pauli.utils import verify_equality
 # This tree must be provided for the algorithm. Every gadget is fitted to this tree and legs are removed 
 # from edges of that graph
 
+# Time complexity O(num_gadgets * ((num_gadgets * num_qubits) + num_qubits * num_qubits * num_gadgets))
+# =O(num_gadgets^2 * num_qubits^2)
+
 def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
     num_qubits = pp.num_qubits
     num_gadgets = len(pp.pauli_gadgets)
@@ -176,7 +179,8 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
 
 def next_leg_to_remove(gadget_index, general_data):
     """ Select next leg (edge+gate combination) to remove from gadget.
-    This can be also filling I in the middle of non-I legs."""
+    This can be also filling I in the middle of non-I legs.
+    time complexity O(num_gadgets * num_qubits)"""
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
 
@@ -285,7 +289,8 @@ def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1
     return leg_change, middle_I_change
 
 def next_gadget(general_data):
-    """ Select closest gadget."""
+    """ Select closest gadget.
+        time complexity O(num_gadgets * num_qubits)"""
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     closest = -1
@@ -305,7 +310,8 @@ def next_gadget(general_data):
     return closest
 
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, device_topology):
-    """apply single qubit gates and CNOT to all non-removed gates."""
+    """apply single qubit gates and CNOT to all non-removed gates.
+    time complexity O(num_gadgets)"""
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     qc_out, qc_prop = circ_data
     num_qubits, num_gadgets = gadget_data.shape

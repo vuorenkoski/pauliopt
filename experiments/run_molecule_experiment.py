@@ -1,5 +1,4 @@
 from itertools import product, repeat
-import logging
 import os
 import pickle
 from datetime import datetime
@@ -10,7 +9,7 @@ import pandas as pd
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
 
-from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping, complete_tree
+from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping, complete_tree
 from pauliopt.topologies import Topology
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping, cnot_depth

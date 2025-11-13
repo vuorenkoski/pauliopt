@@ -4,16 +4,13 @@ import pandas as pd
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
 from pauliopt.pauli.synthesis.dynamic_ordering_synthesis import pauli_polynomial_dynamic_ordering
-from pauliopt.pauli.synthesis.pp_mapping import I_index_mapping, pauli_tree_mapping, complete_tree
+from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping, complete_tree
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
-from experiments.utils import permute_with_mapping, random_mapping, cnot_depth
-from experiments.utils import create_random_pauli_polynomial, order_gadgets
-from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth, map_topology
-from experiments.utils import print_brisbane_mapping, map_tree, create_complete_pauli_polynomial
-from experiments.utils import print_grid25_mapping
+from experiments.utils import permute_with_mapping, random_mapping, cnot_depth, create_random_pauli_polynomial
+from experiments.utils import cnot_count, aggregate_data, get_topo, aggregate_data_depth
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
@@ -24,7 +21,7 @@ def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
 
 
 def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=100, nr_steps=5, rounds=20, max_legs=None, 
-                            verify=True, mapping_method=I_index_mapping, steps=None, allowed_legs=[X,Y,Z]):
+                            verify=True, mapping_method=None, steps=None, allowed_legs=[X,Y,Z]):
     topo = get_topo(backend['name'], backend['qubits'])
     print(topo)
     if logical_qubits is None:
@@ -55,7 +52,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
             mapping_time = time.time()
             map, tree = mapping_method(pp, topo)
             map_r = random_mapping(topo)
-            tree_r = complete_tree(topo)
+            tree_r = complete_tree(topo) # This is needed for forest synth with random mapping
 #            print_grid25_mapping(map, tree)
 #            print_grid25_mapping(map_r, tree_r)
             mapping_time = int((time.time() - mapping_time) * 1000)
