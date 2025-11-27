@@ -224,7 +224,12 @@ class Topology:
         except ModuleNotFoundError as _:
             raise ModuleNotFoundError("You must install the 'networkx' library.")
         g = nx.Graph()
-        g.add_nodes_from(sorted(self.qubits))
+        qubits_involved = set()
+        for coupling in self.couplings:
+            i,j = coupling
+            qubits_involved.add(i)
+            qubits_involved.add(j)
+        g.add_nodes_from(sorted(qubits_involved))
         g.add_edges_from(sorted(self.couplings, key=lambda c: c.as_pair))
         return g
 

@@ -9,6 +9,9 @@ from pauliopt.utils import pi
 from pauliopt.topologies import Topology
 import networkx as nx
 
+from pytket.circuit import OpType
+from pytket.pauli import Pauli
+
 def permute_with_mapping(mapping, pp, num_physical_qubits):
     """Permute the PauliPolynomial with the mapping"""
     if pp.num_qubits > num_physical_qubits:
@@ -275,6 +278,12 @@ def ibm_backend(backend_name):
         raise ValueError(f'Unknown backend: {backend_name}')
     couplings = backend['couplingMap']
     num_qubits = backend['qubits']
+    topo = Topology(num_qubits, couplings)
+    return topo
+
+def topo_from_ibm_backend(backend):
+    couplings = backend.configuration().coupling_map
+    num_qubits = backend.configuration().n_qubits
     topo = Topology(num_qubits, couplings)
     return topo
 
@@ -568,11 +577,127 @@ def print_brisbane_mapping(mapping, tree):
             print()
     print()
 
-def print_brisbane_topo():
+def print_brisbane_topo(active_qubits = None):
     for i in range(13):
         for j in range(15):
             if brisbane[i*15+j] != -1:
-                print('O', end='')
+                if active_qubits is not None and brisbane[i*15+j] in active_qubits:
+                    print('O', end='')
+                else:
+                    print('+', end='')
             else:
                 print(' ', end='')
         print()
+
+def pp_to_list_qiskit(pp):
+    pauli_list = []
+    for gadget in pp.pauli_gadgets:
+        pauli_str = ''
+        for i in range(pp.num_qubits):
+            if gadget.paulis[i] == X:
+                pauli_str += 'X'
+            elif gadget.paulis[i] == Y:
+                pauli_str += 'Y'
+            elif gadget.paulis[i] == Z:
+                pauli_str += 'Z'
+            else:
+                pauli_str += 'I'
+        pauli_list.append((pauli_str[::-1], gadget.angle/2))
+    return pauli_list
+
+def two_qubit_gates_qiskit(qc):
+    count = 0
+    active_qubits = set()
+    q_depth = [0 for _ in range(qc.num_qubits)]
+    for instruction in qc.data:
+        gate = instruction.operation
+        qubits = instruction.qubits
+        if gate.name.startswith('permutation'):
+            continue
+        qubits = [qc.find_bit(q).index for q in qubits]
+        for q in qubits:
+            active_qubits.add(q)
+#        if instructionits.operation.num_qub > 1:
+#            print(instruction.name, qubits)
+        if instruction.operation.num_qubits > 1 or (gate.name == 'ecr' or gate.name == 'cx' or gate.name == 'cz'):
+#            if gate.name!='ecr' and gate.name!='cx':
+#                print(gate.name)
+            count += 1
+            maxd = 0
+            for q in qubits:
+                if q_depth[q] > maxd:
+                    maxd = q_depth[q]
+            for q in qubits:
+                q_depth[q] = maxd + 1
+    depth = 0
+    for i in range(qc.num_qubits):
+        if q_depth[i] > depth:
+            depth = q_depth[i]
+    return {'count': count, 'depth': depth, 'active_qubits': active_qubits}
+
+def two_qubit_gates_tket(qc):
+    count = 0
+    active_qubits = set()
+    max_qubit = 0
+    for qubit in qc.qubits:
+        if qubit.index[0] > max_qubit:
+            max_qubit = qubit.index[0]
+    q_depth = [0 for _ in range(max_qubit+1)]
+    for instruction in qc.get_commands():
+        gate = instruction.op.type
+        qubits = instruction.args
+#        print(gate, qubits)
+        qubits = [q.index[0] for q in qubits]
+#        print(qubits)
+        for q in qubits:
+            active_qubits.add(q)
+        if len(qubits) > 1 or (gate == OpType.CX or gate == OpType.CZ or gate == OpType.CY or gate == OpType.ECR):
+            count += 1
+            maxd = 0
+            for q in qubits:
+                if q_depth[q] > maxd:
+                    maxd = q_depth[q]
+            for q in qubits:
+                q_depth[q] = maxd + 1
+    depth = 0
+    for i in range(max_qubit+1):
+        if q_depth[i] > depth:
+            depth = q_depth[i]
+    return {'count': count, 'depth': depth, 'active_qubits': active_qubits}
+
+def two_qubit_gates_pauliopt(qc):
+    count = 0
+    active_qubits = set()
+    q_depth = [0 for _ in range(qc.n_qubits)]
+    for instruction in qc.gates:
+#        print(instruction)
+        if isinstance(instruction, CX):
+            count += 1
+            active_qubits.add(instruction.control)
+            active_qubits.add(instruction.target)
+            max_depth = max(q_depth[instruction.control], q_depth[instruction.target])
+            q_depth[instruction.control] = max_depth + 1
+            q_depth[instruction.target] = max_depth + 1
+        else:
+            active_qubits.add(instruction.qubits[0])
+    depth = 0
+    for i in range(qc.n_qubits):
+        if q_depth[i] > depth:
+            depth = q_depth[i]
+    return {'count': count, 'depth': depth, 'active_qubits': active_qubits}
+
+def pp_to_pytket_box(pp):
+    pauli_list = []
+    for gadget in pp.pauli_gadgets:
+        pauli_str = []
+        for i in range(pp.num_qubits):
+            if gadget.paulis[i] == X:
+                pauli_str.append(Pauli.X)
+            elif gadget.paulis[i] == Y:
+                pauli_str.append(Pauli.Y)
+            elif gadget.paulis[i] == Z:
+                pauli_str.append(Pauli.Z)
+            else:
+                pauli_str.append(Pauli.I)
+        pauli_list.append((pauli_str, gadget.angle))
+    return pauli_list

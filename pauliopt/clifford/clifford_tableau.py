@@ -825,9 +825,10 @@ class CliffordTableau:
 
         remaining = self.inverse()
         permutation = {v: v for v in range(self.n_qubits)}
-        swappable_nodes = list(range(self.n_qubits))
+        active_qubits = topo.to_nx.nodes()
+        swappable_nodes = list(active_qubits)
 
-        remaining_rows = list(range(self.n_qubits))
+        remaining_rows = list(active_qubits)
 
         G = topo.to_nx
         for e1, e2 in G.edges:

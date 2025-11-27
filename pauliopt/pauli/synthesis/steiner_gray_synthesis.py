@@ -222,7 +222,7 @@ def propagate_circuit(
         pp.propagate(gate, sub_columns)
 
 
-def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, tree, random_sel=False):
+def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, tree):
     if pp.num_qubits != topo.num_qubits:
         raise ValueError(
             f"Number of logical qubits {pp.num_qubits} does not match number of physical qubits {topo.num_qubits}"
@@ -539,7 +539,15 @@ def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, 
     ct_prop = CliffordTableau(pp.num_qubits)
     for gate in circ_prop:
         ct_prop.append_gate(gate)
-    circ_prop, permutation = ct_prop.to_clifford_circuit_perm_row_col(topo, include_swaps=False)
+
+    # Reduce topology to contain only active qubits, for the CT synthesis
+    edges = []
+    for i in range(pp.num_qubits):
+        if i in tree[1]:
+            for j in tree[1][i] or []:
+                edges.append((i,j))
+    reduced_topo = Topology(topo.num_qubits, list(edges))
+    circ_prop, permutation = ct_prop.to_clifford_circuit_perm_row_col(reduced_topo, include_swaps=False)
 
 #    circ_prop, permutation = synthesize_tableau(
 #        circ_prop.to_tableau(), topo, include_swaps=False
@@ -550,8 +558,12 @@ def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, 
     for gate in circ_pre.gates:
         if isinstance(gate, CX):
             pre_cx += 1
+    qc_prop_syn_count = 0
+    for gate in circ_prop.gates:
+        if isinstance(gate, CX):
+            qc_prop_syn_count += 1
 
     circ_out = circ_out + circ_recurse + circ_prop
     circ_out.final_permutation = circ_prop.final_permutation
     permutation = [permutation[i] for i in range(pp.num_qubits)]
-    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx}
+    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'tableau-cnot': qc_prop_syn_count}

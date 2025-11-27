@@ -122,8 +122,8 @@ if __name__ == "__main__":
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 16}
-#    backend = {'name': 'line', 'qubits': 6}
+#    backend = {'name': 'grid', 'qubits': 16}
+    backend = {'name': 'line', 'qubits': 16}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
     logical_qubits = 16

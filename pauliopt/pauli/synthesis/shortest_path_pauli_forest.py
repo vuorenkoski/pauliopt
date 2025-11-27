@@ -56,7 +56,8 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
                 raise ValueError(f'Unknown Pauli {gadget_data[j,i]} in gadget {i}')
         gadget_angles.append(gadget.angle)
         create_gadget_graph(gadget_data, tree, gadget_graph_degrees, gadget_graph_last_edge, i)
-    device_topology = topology_from_tree(gadget_data, tree)
+    device_topology = graph_from_tree(gadget_data, tree)
+    tree_topo = Topology(topo.num_qubits, list(device_topology.edges))
     general_data = (gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge)
     circ_data = (qc_out, qc_prop)
     debug and print('---------------------Initial gadget data')
@@ -99,7 +100,7 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
     ct_prop = CliffordTableau(num_qubits)
     for gate in qc_prop_r:
         ct_prop.append_gate(gate)
-    qc_prop_syn, permutation = ct_prop.to_clifford_circuit_perm_row_col(topo, include_swaps=False)
+    qc_prop_syn, permutation = ct_prop.to_clifford_circuit_perm_row_col(tree_topo, include_swaps=True)
 
     # Combine circuits
     circ_out = qc_out + qc_prop_syn
@@ -111,10 +112,13 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
     for gate in qc_out.gates:
         if isinstance(gate, CX):
             pre_cx += 1
-    density = cnot_count_density(qc_out)
-    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'density': density, 'last_leg': last_leg}
+    qc_prop_syn_count = 0
+    for gate in qc_prop_syn.gates:
+        if isinstance(gate, CX):
+            qc_prop_syn_count += 1
+    return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'tableau-cnot':qc_prop_syn_count}
 
-def topology_from_tree(gadget_data, tree):
+def graph_from_tree(gadget_data, tree):
     """Create device topology from gadget tree structure."""
     num_qubits, num_gadgets = gadget_data.shape
     root, tree_children = tree
