@@ -93,32 +93,35 @@ def floydWarshall(graph):
                     g[i][j] = g[i][k] + g[k][j]
     return g
 
-def create_random_phase_gadget(num_qubits, min_legs, max_legs, allowed_angles, allowed_legs=None, empty_qubits=0):
+def create_random_pauli_gadget(
+        num_qubits, min_legs, max_legs, allowed_angles, allowed_legs=None
+):
     if allowed_legs is None:
         allowed_legs = [X, Y, Z]
-    angle = random.choice(allowed_angles)
-    nr_legs = random.randint(min_legs, max_legs)
-    legs = random.choices(
-        [i for i in range(num_qubits-empty_qubits)], k=nr_legs)
+    angle = np.random.choice(allowed_angles)
+    nr_legs = np.random.randint(min_legs, max_legs)
+    legs = np.random.choice(
+        [i for i in range(num_qubits)], size=nr_legs, replace=False)
     phase_gadget = [I for _ in range(num_qubits)]
     for leg in legs:
-        phase_gadget[leg] = random.choice(allowed_legs)
+        phase_gadget[leg] = np.random.choice(allowed_legs)
     return PPhase(angle) @ phase_gadget
 
-
-def create_random_pauli_polynomial(num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angles=None, seed=None, empty_qubits=0, allowed_legs=[X, Y, Z]):
+def create_random_pauli_polynomial(
+        num_qubits: int, num_gadgets: int, min_legs=None, max_legs=None, allowed_angels=None, allowed_legs=None
+):
     if min_legs is None:
         min_legs = 1
     if max_legs is None:
-        max_legs = num_qubits - empty_qubits
-    if allowed_angles is None:
-        allowed_angles = [pi, pi / 2, pi / 4, pi / 8, pi / 16]
+        max_legs = num_qubits
+    if allowed_angels is None:
+        allowed_angels = [pi, pi / 2, pi / 4, pi / 8, pi / 16]
 
-    if seed is not None:
-        random.seed(seed)
     pp = PauliPolynomial(num_qubits)
     for _ in range(num_gadgets):
-        pp >>= create_random_phase_gadget(num_qubits, min_legs, max_legs, allowed_angles, empty_qubits=empty_qubits, allowed_legs=allowed_legs)
+        pp >>= create_random_pauli_gadget(
+            num_qubits, min_legs, max_legs, allowed_angels
+        )
 
     return pp
 
