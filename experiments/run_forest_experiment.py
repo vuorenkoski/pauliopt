@@ -1,5 +1,7 @@
+import os
 import random, time
 import pandas as pd
+import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
@@ -11,6 +13,9 @@ from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynom
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from experiments.utils import permute_with_mapping, random_mapping, cnot_depth, create_random_pauli_polynomial
 from experiments.utils import cnot_count, aggregate_data, get_topo, aggregate_data_depth
+from pauliopt.pauli.pauli_gadget import PauliGadget
+import pickle
+from pauliopt.utils import AngleVar
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
@@ -36,7 +41,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
     print('Random iterations:', rounds)
     print('Mapping method:', mapping_method.__name__)
     print('Synthesis methods:', [m.__name__ for m in methods])
-    print('Baseline method:', methods[1].__name__)
+    print('Baseline method (m2):', methods[1].__name__)
     print('Verifying:', verify)
     df = pd.DataFrame(columns=['n_rep','num_qubits','n_gadgets','method','mapping','cx','cx_depth','time','pre-cx'])
     if not steps:
@@ -49,6 +54,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
             else:
                 pp = create_random_pauli_polynomial(logical_qubits, num_gadgets, min_legs=1, max_legs=max_legs, allowed_legs=allowed_legs)
             pp = simplify_pauli_polynomial(pp, allow_acs=True)
+            pp = pad_pp_to_larger_backend(pp, backend['qubits'])
             mapping_time = time.time()
             map, tree = mapping_method(pp, topo)
             map_r = random_mapping(topo)
@@ -78,6 +84,7 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                         } | benchmarks | {'time': mapping_time + int((time.time()-start) * 1000)}
                 df.loc[len(df)] = column
                 
+#                print(column)
                 start = time.time()
                 circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo, tree_r)
                 if verify:
@@ -98,20 +105,94 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
         df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
         print(df2.tail(1).to_string(header=first))
         first = False 
-        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+'.csv')
+        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q.csv')
         df2 = aggregate_data_depth(df, methods[0].__name__, methods[1].__name__)
-        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+'_depth.csv')
+        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q_depth.csv')
 
     df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
-    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+'.csv')
+    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q.csv')
     print(df2.to_string())
     df2 = aggregate_data_depth(df, methods[0].__name__, methods[1].__name__)
-    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+'_depth.csv')
+    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q_depth.csv')
     print('Depth data')
     print(df2.to_string())
 
+def pad_pp_to_larger_backend(pp: PauliPolynomial, n_qubits):
+    pp_ = PauliPolynomial(n_qubits)
+
+    pp_qubits = pp.num_qubits
+
+    identity_pad = [I for _ in range(n_qubits - pp_qubits)]
+
+    for gadget in pp:
+        assert isinstance(gadget, PauliGadget)
+        angle = gadget.angle
+        paulis = gadget.paulis + identity_pad
+
+        pp_ >>= PauliGadget(angle, paulis)
+    return pp_
+
+def analyse_molecules():
+    op_directory = "./pp_molecules/"
+    files = os.listdir(op_directory)
+    for filename in files:
+        if filename.endswith(".pickle"):
+            print('Analysing molecule:', filename)
+            pp = molecule_pp(os.path.join(op_directory, filename))
+            analyse_pp(pp)
+
+
+def analyse_pp(pp: PauliPolynomial):
+    print('Number of gadgets:', pp.num_gadgets)
+    print('Number of qubits:', pp.num_qubits)
+    leg_counts = {}
+    z_count = 0
+    x_count = 0
+    y_count = 0
+    i_count = 0
+    qubits = np.zeros(pp.num_qubits)
+    for gadget in pp.pauli_gadgets:
+        n_legs = 0
+        for i,p in enumerate(gadget.paulis):
+            if p == Z:
+                z_count += 1
+            elif p == X:
+                x_count += 1
+            elif p == Y:
+                y_count += 1
+            elif p == I:
+                i_count += 1
+            if p != I:
+                n_legs += 1
+                qubits[i] += 1
+
+        if n_legs not in leg_counts:
+            leg_counts[n_legs] = 0
+        leg_counts[n_legs] += 1
+    for n_legs in sorted(leg_counts.keys()):
+        print(f'Gadgets with {n_legs} legs: {leg_counts[n_legs]}')
+    print('Total Z legs:', z_count)
+    print('Total X legs:', x_count)
+    print('Total Y legs:', y_count)
+    print('Total I legs:', i_count)
+    print('Qubit usage (number of legs on each qubit):', qubits)
+
+def molecule_pp(filename):
+    with open(filename, "rb") as pickle_in:
+        pp = pickle.load(pickle_in)
+        gadgets = []
+        for gadget in pp.pauli_gadgets:
+            if not isinstance(gadget.angle, AngleVar):
+                gadget2 = PauliGadget(gadget.angle, gadget.paulis)
+            else:
+                gadget2 = PauliGadget(AngleVar(gadget.angle._label,gadget.angle._latex_label), gadget.paulis)
+            gadgets.append(gadget2)
+        pp.pauli_gadgets = gadgets
+        pp = simplify_pauli_polynomial(pp, allow_acs=True)
+    return pp
 
 if __name__ == "__main__":
+#    analyse_molecules()
     # In comparison, baseline is the second method
     methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
 #    methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
@@ -120,10 +201,12 @@ if __name__ == "__main__":
     mapping_method = pauli_tree_mapping
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
+#    steps = list(range(50, 3000, 50))
+#    steps = [1000]
 #    backend = {'name': 'quito', 'qubits': 5}
-#    backend = {'name': 'guadalupe', 'qubits': 16}
-#    backend = {'name': 'grid', 'qubits': 16}
-    backend = {'name': 'line', 'qubits': 16}
+    backend = {'name': 'guadalupe', 'qubits': 16}
+    backend = {'name': 'grid', 'qubits': 16}
+#    backend = {'name': 'line', 'qubits': 16}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
     logical_qubits = 16

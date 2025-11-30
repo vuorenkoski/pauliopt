@@ -12,7 +12,7 @@ from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pa
 from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping, complete_tree
 from pauliopt.topologies import Topology
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
-from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping, cnot_depth
+from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping, cnot_depth, random_mapping
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I
 from pauliopt.pauli.pauli_gadget import PauliGadget
 from pauliopt.utils import AngleVar
@@ -123,10 +123,19 @@ def synth_pp_shortest_path_mapping(pp: PauliPolynomial, topo: Topology):
     circ_out, gadget_perm, perm, benchmarks = shortest_path_pauli_forest(pp_m, topo, tree)
     return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 
 
+def synth_pp_shortest_path(pp: PauliPolynomial, topo: Topology):
+    pp = simplify_pauli_polynomial(pp, allow_acs=True)
+#    map_r = random_mapping(topo)
+    tree_c = complete_tree(topo) # This is needed for forest synth with random mapping
+#    pp_m = permute_with_mapping(map_r, pp, topo.num_qubits)
+    circ_out, gadget_perm, perm, benchmarks = shortest_path_pauli_forest(pp, topo, tree_c)
+    return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 
+
 SYNTHESIS_METHODS = {
     "pauliopt_steiner_gray": synth_pp_pauliopt_steiner_gray,
-    "shortest_path_synthesis": synth_pp_shortest_path_mapping,
-}
+    "shortest_path_synthesis_map": synth_pp_shortest_path_mapping,
+    "shortest_path_synthesis": synth_pp_shortest_path,
+    }
 
 def threaded_real_hw_ucc_evaluation(max_qubits=30):
     op_directory = "./pp_molecules/"

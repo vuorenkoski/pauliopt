@@ -15,6 +15,7 @@ from tests.pauli.utils import verify_equality
 # by many different paths. A path is composed from steps. In each step cnot is applied in addition to
 # single qubit gates. Single qubit gate for control is either I, V or S+V and for target V, S or V+S.
 # S = sqrt(Z), V = sqrt(X)
+# S = Y->X->Y, V = Y->Z->Y, SV = Z->Y->X->Z, VS = X->Y->Z->X
 
 # Path is formed step by step, so that each step removes one leg from gadget, or appends non-I leg  
 # where I is in the middle of non-I legs. From multiple step choices, one is selected which brings

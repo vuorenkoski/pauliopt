@@ -541,13 +541,16 @@ def pauli_polynomial_steiner_gray_clifford(pp: PauliPolynomial, topo: Topology, 
         ct_prop.append_gate(gate)
 
     # Reduce topology to contain only active qubits, for the CT synthesis
-    edges = []
-    for i in range(pp.num_qubits):
-        if i in tree[1]:
-            for j in tree[1][i] or []:
-                edges.append((i,j))
-    reduced_topo = Topology(topo.num_qubits, list(edges))
-    circ_prop, permutation = ct_prop.to_clifford_circuit_perm_row_col(reduced_topo, include_swaps=False)
+    if tree is None:
+        circ_prop, permutation = ct_prop.to_clifford_circuit_perm_row_col(topo, include_swaps=False)
+    else:
+        edges = []
+        for i in range(pp.num_qubits):
+            if i in tree[1]:
+                for j in tree[1][i] or []:
+                    edges.append((i,j))
+        reduced_topo = Topology(topo.num_qubits, list(edges))
+        circ_prop, permutation = ct_prop.to_clifford_circuit_perm_row_col(reduced_topo, include_swaps=False)
 
 #    circ_prop, permutation = synthesize_tableau(
 #        circ_prop.to_tableau(), topo, include_swaps=False
