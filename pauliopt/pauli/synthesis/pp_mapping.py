@@ -1,6 +1,6 @@
-from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I, X, Y, Z
+import random
 import numpy as np
-import random, time
+from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I
 
 # Similar to I-index mapping: https://ieeexplore.ieee.org/abstract/document/10771974
 # Differences: how mapping is done after initial physical and logical qubit pair. I-index has more straightforward way: what logical qubit woul

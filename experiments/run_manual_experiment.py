@@ -8,11 +8,15 @@ from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
-from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth
+from experiments.utils import permute_with_mapping, qubit_correlation_sum, random_mapping, I_index, cnot_depth, two_qubit_gates_pauliopt
 from experiments.utils import create_random_pauli_polynomial, steiner_tree_analysis, order_gadgets
 from experiments.utils import cnot_count, print_pp, aggregate_data, get_topo, aggregate_data_depth, map_topology
 from experiments.utils import print_brisbane_mapping, map_tree, create_complete_pauli_polynomial
 from experiments.utils import print_grid25_mapping, print_brisbane_topo
+
+from pauliopt.pauli.pauli_gadget import PauliGadget
+import pickle
+from pauliopt.utils import AngleVar
 
 def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     pp2 = PauliPolynomial(pp.num_qubits)
@@ -361,37 +365,36 @@ def test_random_gadget_ordering(pp, backend, mapping, tree,synth_method, rounds=
     return int(sum_cx / count)
 
 
+def molecule_pp(filename):
+    with open(filename, "rb") as pickle_in:
+        pp = pickle.load(pickle_in)
+        gadgets = []
+        for gadget in pp.pauli_gadgets:
+            if not isinstance(gadget.angle, AngleVar):
+                gadget2 = PauliGadget(gadget.angle, gadget.paulis)
+            else:
+                gadget2 = PauliGadget(AngleVar(gadget.angle._label,gadget.angle._latex_label), gadget.paulis)
+            gadgets.append(gadget2)
+        pp.pauli_gadgets = gadgets
+        pp = simplify_pauli_polynomial(pp, allow_acs=True)
+    return pp
+
+def pad_pp_to_larger_backend(pp: PauliPolynomial, n_qubits):
+    pp_ = PauliPolynomial(n_qubits)
+
+    pp_qubits = pp.num_qubits
+
+    identity_pad = [I for _ in range(n_qubits - pp_qubits)]
+
+    for gadget in pp:
+        assert isinstance(gadget, PauliGadget)
+        angle = gadget.angle
+        paulis = gadget.paulis + identity_pad
+
+        pp_ >>= PauliGadget(angle, paulis)
+    return pp_
+
 if __name__ == "__main__":
-    methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
-#    methods = [pauli_polynomial_dynamic_ordering_treem2, pauli_polynomial_dynamic_ordering_tree]
-    verify = False
-    mapping_method = pauli_tree_mapping
-#    mapping_method = I_index_mapping
-    random.seed(42)
-    steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
-#    steps = list(range(700, 2000, 100))
-#    steps = list(range(20, 220, 20))
-#    steps = list(range(20, 220, 20)) + list(range(200, 2000, 100))
-#    backend = {'name': 'quito', 'qubits': 5}
-#    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 25}
-#    backend = {'name': 'line', 'qubits': 6}
-#    backend = {'name': 'cycle', 'qubits': 10}
-#    backend = {'name': 'brisbane', 'qubits': 127}
-#    trivial_mapping = [19,20,21,22,23,24,25,33,34,38,39,40,41,42,43,44] # 16 qubits in brisbane
-#    trivial_mapping = [19,20,21,22,23,24,25,26,27,28,29,33,34,35,38,39,40,41,42,43,44,45,46,47,48,53,54,60,61,62,63,64] # 32 qubits in brisbane
-    logical_qubits = 9
-    trivial_mapping = list(range(logical_qubits))
-    samples = 200
-    max_legs = None
-    
-#    print_brisbane_topo()
-#    trivial_pauli_experiment(trivial_mapping, backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-#    random_pauli_experiment(backend, methods, logical_qubits=logical_qubits, nr_gadgets=200, nr_steps=20, rounds=samples, 
-#                           allowed_legs=[Z, X, Y], verify=verify, mapping_method=mapping_method, steps=steps, max_legs=max_legs)
-#    input()
-
-
     #
     # Testing single pauli polynomial
     #
@@ -399,26 +402,32 @@ if __name__ == "__main__":
     random.seed(seed)
     gadgets = 80
     synth_method = shortest_path_pauli_forest
-#    synth_method = pauli_polynomial_steiner_gray_clifford
+    synth_method2 = pauli_polynomial_steiner_gray_clifford
 #    backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'grid', 'qubits': 16}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
     backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 16
-    random.seed(seed)
-    pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0, allowed_legs=[Z,X,Y])
+    print('Backend:', backend)
+    pp = molecule_pp('./pp_molecules/H2O_BK_sto3g.pickle')
+    logical_qubits = pp.num_qubits
+    print('Number of logical qubits:', logical_qubits)
+#    pp = create_random_pauli_polynomial(logical_qubits, gadgets, seed=seed, empty_qubits=0, allowed_legs=[Z,X,Y])
 #    pp = create_complete_pauli_polynomial(backend['qubits'], allowed_legs=[Z,X,Y])
+    print('simplifying...')
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
+#    pp = pad_pp_to_larger_backend(pp, backend['qubits'])
 #    print('native paulis')
     print('gadgets after simplification:', len(pp.pauli_gadgets))
 #    print_pp(pp)
 
     topo = get_topo(backend['name'], backend['qubits'])
 #    synth_method = pauli_polynomial_steiner_gray_clifford
+    print('Mapping...')
     mapping, tree = pauli_tree_mapping(pp, topo) # mapping produces 112 with 80,42
 #    print_grid25_mapping(mapping, tree)
 #    print('algorithm mapping', qubit_order(mapping))
-    print('tree', tree)
+    print_brisbane_mapping(mapping, tree)
+#    print('tree', tree)
 #    mapping = get_mapping_from_order([1, 2, 0, 4, 3, 5]) # best with 80,42: pre-cx 100
 #    mapping = get_mapping_from_order([1, 2, 4, 0, 5, 3]) # pre-cx 138
 #    print('used mapping', qubit_order(mapping))
@@ -444,7 +453,6 @@ if __name__ == "__main__":
     # this is ver good ordering for mapping algorithm, produces 95 cnots (compared to 112 in trivial order)
 #    pp_m = reorder_gadgets(pp_m, [48, 31, 23, 3, 27, 43, 16, 4, 32, 38, 29, 37, 11, 1, 7, 28, 53, 14, 13, 18, 21, 49, 52, 51, 22, 35, 10, 2, 9, 34, 5, 0, 33, 44, 46, 40, 30, 6, 36, 26, 50, 8, 47, 45, 12, 42, 25, 39, 15, 41, 24, 19, 17, 20])
 #    pp_m = reorder_gadgets(pp_m, [12, 33, 46, 31, 35, 14, 49, 25, 41, 21, 2, 51, 6, 39, 53, 13, 17, 19, 44, 48, 1, 10, 15, 38, 7, 3, 34, 43, 45, 36, 16, 42, 52, 20, 24, 29, 23, 0, 9, 5, 32, 37, 11, 8, 30, 18, 27, 50, 40, 26, 28, 22, 47, 4])
-    print('optimal preorder')
 #    print_pp(pp_m)
     # this is poor ordering 138
 #    pp_m = reorder_gadgets(pp_m, [40, 20, 69, 2, 53, 23, 19, 32, 41, 15, 68, 55, 28, 16, 37, 29, 22, 21, 4, 33, 52, 5, 43, 14, 26, 9, 38, 61, 48, 67, 70, 18, 46, 45, 7, 66, 36, 47, 56, 57, 42, 62, 35, 54, 27, 39, 34, 17, 6, 0, 60, 49, 10, 44, 58, 64, 24, 8, 30, 13, 51, 63, 1, 31, 3, 11, 59, 25, 65, 50, 12])
@@ -459,13 +467,28 @@ if __name__ == "__main__":
 #    print_order = [0, 4, 30, 47, 2, 31, 33, 3, 46, 1, 40, 43, 44, 6, 8, 23, 9, 28, 38, 50, 5, 10, 12, 32, 7, 17, 53, 11, 13, 20, 35, 21, 26, 22, 48, 14, 18, 16, 24, 36, 37, 15, 25, 41, 39, 42, 27, 34, 45, 52, 49, 51, 19, 29]
 #    print('manual order')
 #    print_pp(pp_m, order=print_order)
+    print('synthesizing...')
+    start = time.time()
     circ_out, gadget_perm, perm, benchmarks = synth_method(pp_m.copy(), topo, tree, debug=False, print_order=print_order, random_sel=False)
+    print('synthesis time (ms):', int((time.time() - start)*1000))
+    active_qubits = two_qubit_gates_pauliopt(circ_out)['active_qubits']
+    print_brisbane_topo(active_qubits)
 #    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
     print('CNOT count:',cnot_count(circ_out))
+    print('CNOT depth:',cnot_depth(circ_out))
     print(benchmarks)
-    print('seed',seed)
-    print('gadget perm', gadget_perm)
+ #   print('gadget perm', gadget_perm)
     print()
+    print('steiner-gray synthesis:')
+    start = time.time()
+    circ_out, gadget_perm, perm, benchmarks = synth_method2(pp, topo, None)
+    print('synthesis time (ms):', int((time.time() - start)*1000))
+    active_qubits = two_qubit_gates_pauliopt(circ_out)['active_qubits']
+    print_brisbane_topo(active_qubits)
+#    circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp.copy(),topo, random_sel=False)
+    print('CNOT count:',cnot_count(circ_out))
+    print('CNOT depth:',cnot_depth(circ_out))
+    print(benchmarks)
 #    print('verifying circuit equivalence...')
 #    verify = check_circuit_equivalence(pp_m.copy(), circ_out, gadget_perm, perm)
 #    print('Circuit equivalence:', verify)

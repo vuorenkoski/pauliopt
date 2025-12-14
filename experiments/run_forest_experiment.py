@@ -59,8 +59,6 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
             map, tree = mapping_method(pp, topo)
             map_r = random_mapping(topo)
             tree_r = complete_tree(topo) # This is needed for forest synth with random mapping
-#            print_grid25_mapping(map, tree)
-#            print_grid25_mapping(map_r, tree_r)
             mapping_time = int((time.time() - mapping_time) * 1000)
             pp_m = permute_with_mapping(map, pp, topo.num_qubits)
             pp_r = permute_with_mapping(map_r, pp, topo.num_qubits)
@@ -197,19 +195,19 @@ if __name__ == "__main__":
     methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
 #    methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
 #    methods = [shortest_path_pauli_forest, pauli_polynomial_dynamic_ordering]
-    verify = False
+    verify = True
     mapping_method = pauli_tree_mapping
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
+#    steps = [2000]
 #    steps = list(range(50, 3000, 50))
-#    steps = [1000]
 #    backend = {'name': 'quito', 'qubits': 5}
-    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 16}
-#    backend = {'name': 'line', 'qubits': 16}
+#    backend = {'name': 'guadalupe', 'qubits': 16}
+    backend = {'name': 'grid', 'qubits': 9}
+#    backend = {'name': 'line', 'qubits': 6}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 16
+    logical_qubits = 9
     samples = 200
     max_legs = None
     

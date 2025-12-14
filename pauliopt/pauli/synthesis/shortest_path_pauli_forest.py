@@ -1,5 +1,4 @@
 import networkx as nx
-from experiments.utils import cnot_count_density
 import numpy as np
 
 from pauliopt.clifford.clifford_tableau import CliffordTableau
@@ -170,12 +169,14 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
     pauli = gadget_data[qubit,gadget_index]
     removed_gadgets[gadget_index] = 1
     if pauli == 0b01:
-        qc_out.h(qubit)
+        qc_out.s(qubit)
+        qc_out.v(qubit)
     elif pauli == 0b11:
         qc_out.v(qubit)
     qc_out.rz(gadget_angles[gadget_index], qubit)
     if pauli == 0b01:
-        qc_out.h(qubit)
+        qc_out.vdg(qubit)
+        qc_out.sdg(qubit)
     elif pauli == 0b11:
         qc_out.vdg(qubit)
     perm_gadgets.append(gadget_index)

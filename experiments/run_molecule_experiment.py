@@ -53,11 +53,11 @@ def create_csv_header_real_hw():
 
 def get_suitable_ibm_backend(n_qubits):
     available_backends = [
-        ("quito", 5),
-        ("nairobi", 7),
-        ("guadalupe", 15),
-        ("mumbai", 27),
-        ("ithaca", 65),
+#        ("quito", 5),
+#        ("nairobi", 7),
+#        ("guadalupe", 15),
+#        ("mumbai", 27),
+#        ("ithaca", 65),
         ("brisbane", 127),
     ]
 
