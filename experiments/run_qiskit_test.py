@@ -15,11 +15,11 @@ from pytket.architecture import Architecture
 from pytket.passes import CXMappingPass, FullPeepholeOptimise
 from pytket.placement import GraphPlacement
 
-from utils import create_random_pauli_polynomial, print_brisbane_topo, print_pp, pp_to_list_qiskit, cnot_count, get_topo, permute_with_mapping
+from utils import create_random_pauli_polynomial, pp_to_list_qiskit, permute_with_mapping
 from utils import two_qubit_gates_qiskit, two_qubit_gates_tket, pp_to_pytket_box, two_qubit_gates_pauliopt, topo_from_ibm_backend
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
-from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping
+from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 
 
@@ -105,7 +105,7 @@ def experiment(num_qubits, gadgets, qiskit_backend, rounds):
     df = pd.DataFrame(columns=['n_rep','num_qubits','num_gadgets','method','count','depth','time'])
     for num_gadgets in gadgets:
         for i in range(rounds):
-            print(num_gadgets, i)
+            print('num gadgets:', num_gadgets, 'round:', i)
             pp = create_random_pauli_polynomial(num_qubits, num_gadgets)
             pp = simplify_pauli_polynomial(pp, allow_acs=True)
             results = qiskit_default_test(pp, qiskit_backend)
@@ -131,33 +131,18 @@ def experiment(num_qubits, gadgets, qiskit_backend, rounds):
             df.loc[len(df)] = {'n_rep': i, 'num_qubits': num_qubits, 'num_gadgets': num_gadgets, 'method': results['method'],
                             'count': results['routed']['count'], 'depth': results['routed']['depth'], 
                             'time': results['time']}
-    df.to_csv('qiskit_test_'+str(num_qubits)+'.csv')
+    df.to_csv('results/qiskit_test_'+str(num_qubits)+'.csv')
     df = df.drop(['n_rep', 'num_qubits'], axis=1).groupby(['method','num_gadgets']).mean().round(1)
-    df.to_csv('qiskit_test_aggr'+str(num_qubits)+'.csv')
+    df.to_csv('results/qiskit_test_aggr'+str(num_qubits)+'.csv')
     return df
-
-def single_run_tests(pp, qiskit_backend):
-    results = qiskit_lietrotter_test(pp, qiskit_backend)
-    print(results['method'], results['routed']['count'])
-
-    results = qiskit_rustiq_test(pp, qiskit_backend)
-    print(results['method'], results['routed']['count'])
-
-    results = tket_test(pp, qiskit_backend)
-    print(results['method'], results['routed']['count'])
-
-    results = sppf_test(pp, qiskit_backend)
-    print(results['method'], results['routed']['count'])
-
-    results = sgc_test(pp, qiskit_backend)
-    print(results['method'], results['routed']['count'])
 
 #qiskit_backend = FakeGuadalupeV2()
 qiskit_backend = FakeBrisbane()
 seed = 42
 # max 80/150, 30/500 
 logical_qubits = 16
-gadgets = [10,20,30,40,50,60,70,80,90,100]
+# gadgets = [10,20,30,40,50,60,70,80,90,100]
+gadgets = [10,20]
 rounds = 20
 
 print('\n--------------experiment start----------------')

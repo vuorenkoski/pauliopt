@@ -9,7 +9,7 @@ import pandas as pd
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
 
-from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping, complete_tree
+from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping, complete_tree
 from pauliopt.topologies import Topology
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 from experiments.utils import get_topo, find_square_dimensions, cnot_count, permute_with_mapping, cnot_depth, random_mapping
@@ -144,7 +144,7 @@ def threaded_real_hw_ucc_evaluation(max_qubits=30):
     results_directory = "./"
     os.makedirs(results_directory, exist_ok=True)
 
-    results_file = os.path.join(results_directory, "results_molecules.csv")
+    results_file = os.path.join(results_directory, "results/results_molecules.csv")
     df = pd.DataFrame({c: [] for c in create_csv_header_real_hw()})
     with open(results_file, "wb") as f:
         df.to_csv(f, header=create_csv_header_real_hw(), index=False)

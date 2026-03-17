@@ -5,8 +5,7 @@ import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
-from pauliopt.pauli.synthesis.dynamic_ordering_synthesis import pauli_polynomial_dynamic_ordering
-from pauliopt.pauli.synthesis.pp_mapping import pauli_tree_mapping, complete_tree
+from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping, complete_tree
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
 
@@ -23,7 +22,6 @@ def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
     circ = circ_out.to_qiskit()
     pp_circ = pp2.to_qiskit()
     return verify_equality(pp_circ,circ)
-
 
 def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=100, nr_steps=5, rounds=20, max_legs=None, 
                             verify=True, mapping_method=None, steps=None, allowed_legs=[X,Y,Z]):
@@ -103,15 +101,15 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
         df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
         print(df2.tail(1).to_string(header=first))
         first = False 
-        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q.csv')
+        df2.to_csv('results/aggregated_'+backend['name']+str(backend['qubits'])+'q.csv')
         df2 = aggregate_data_depth(df, methods[0].__name__, methods[1].__name__)
-        df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q_depth.csv')
+        df2.to_csv('results/aggregated_'+backend['name']+str(backend['qubits'])+'q_depth.csv')
 
     df2 = aggregate_data(df, methods[0].__name__, methods[1].__name__)
-    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q.csv')
+    df2.to_csv('results/aggregated_'+backend['name']+str(backend['qubits'])+'q.csv')
     print(df2.to_string())
     df2 = aggregate_data_depth(df, methods[0].__name__, methods[1].__name__)
-    df2.to_csv('aggregated_'+backend['name']+str(backend['qubits'])+str(logical_qubits)+'q_depth.csv')
+    df2.to_csv('results/aggregated_'+backend['name']+str(backend['qubits'])+'q_depth.csv')
     print('Depth data')
     print(df2.to_string())
 
@@ -190,24 +188,18 @@ def molecule_pp(filename):
     return pp
 
 if __name__ == "__main__":
-#    analyse_molecules()
-    # In comparison, baseline is the second method
     methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
-#    methods = [pauli_polynomial_dynamic_ordering, pauli_polynomial_steiner_gray_clifford]
-#    methods = [shortest_path_pauli_forest, pauli_polynomial_dynamic_ordering]
-    verify = True
+    verify = False
     mapping_method = pauli_tree_mapping
     random.seed(42)
     steps = list(range(2, 40, 2)) + list(range(40, 220, 20)) + list(range(200, 2000, 100))
-#    steps = [2000]
-#    steps = list(range(50, 3000, 50))
 #    backend = {'name': 'quito', 'qubits': 5}
 #    backend = {'name': 'guadalupe', 'qubits': 16}
-    backend = {'name': 'grid', 'qubits': 9}
-#    backend = {'name': 'line', 'qubits': 6}
+#    backend = {'name': 'grid', 'qubits': 9}
+    backend = {'name': 'line', 'qubits': 16}
 #    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
-    logical_qubits = 9
+    logical_qubits = 16
     samples = 200
     max_legs = None
     

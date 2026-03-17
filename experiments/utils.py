@@ -4,7 +4,7 @@ from pauliopt.pauli.pauli_gadget import PauliGadget
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, I, Z, X, Y
 from pauliopt.gates import CX
 from pauliopt.pauli.pauli_gadget import PPhase
-from pauliopt.pauli.synthesis.pp_mapping import qubit_correlations
+from pauliopt.pauli.synthesis.tree_mapping import qubit_correlations
 from pauliopt.utils import pi
 from pauliopt.topologies import Topology
 import networkx as nx
