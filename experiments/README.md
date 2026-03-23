@@ -9,4 +9,4 @@
 ## Algorithms
 
 - [Mapping algorithm](../pauliopt/pauli/synthesis/tree_mapping.py)
-- [Synthesis algorithm](../pauliopt/pauli/synthesis/shortest_path_pauliforest.py)
+- [Synthesis algorithm](../pauliopt/pauli/synthesis/shortest_path_pauli_forest.py)
