@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
-from pauliopt.pauli.synthesis.shortest_path_pauli_forest import shortest_path_pauli_forest
+from pauliopt.pauli.synthesis.pathfinder_in_pauli_grove import pathfinder_in_pauli_grove
 from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping, complete_tree
 from tests.pauli.utils import verify_equality
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
@@ -188,7 +188,7 @@ def molecule_pp(filename):
     return pp
 
 if __name__ == "__main__":
-    methods = [shortest_path_pauli_forest, pauli_polynomial_steiner_gray_clifford]
+    methods = [pathfinder_in_pauli_grove, pauli_polynomial_steiner_gray_clifford]
     verify = False
     mapping_method = pauli_tree_mapping
     random.seed(42)
@@ -197,7 +197,6 @@ if __name__ == "__main__":
 #    backend = {'name': 'guadalupe', 'qubits': 16}
 #    backend = {'name': 'grid', 'qubits': 9}
     backend = {'name': 'line', 'qubits': 16}
-#    backend = {'name': 'cycle', 'qubits': 10}
 #    backend = {'name': 'brisbane', 'qubits': 127}
     logical_qubits = 16
     samples = 200

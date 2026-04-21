@@ -1,15 +1,12 @@
-import random
 import numpy as np
 from pauliopt.pauli.pauli_polynomial import PauliPolynomial, Topology, I
 
-# Similar to I-index mapping: https://ieeexplore.ieee.org/abstract/document/10771974
-# Differences: how mapping is done after initial physical and logical qubit pair. I-index has more straightforward way: what logical qubit woul
-# have most common legs with mapped logical qubit when new logical qubit would be placed as a neighbour of mapped logical qubit.
-
 def pauli_tree_mapping(pp: PauliPolynomial, topo: Topology):
-    # This mapping gives weights to edges according to the how many paulis have both these legs
-    # Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical 
-    # qubit which have most common non-I legs with mapped qubit. Connections are made as a tree structure.
+    """ Algorithm for initial mapping giving weights to edges between qubits according to the how many paulis have both these legs. 
+    :param pp: PauliPolynomial to map
+    :param topo: Topology of the physical qubits
+    :return: mapping from logical qubits to physical qubits, and tree structure used in the mapping
+    """
     weights = edges_by_I_index(pp)
     mapping, tree = map_qubits_as_tree(weights, pp, topo)
     return mapping, tree
@@ -17,7 +14,6 @@ def pauli_tree_mapping(pp: PauliPolynomial, topo: Topology):
 def edges_by_I_index(pp: PauliPolynomial):
     """ Gives edges weight by calculating gadgets having both qubits non-I.
     :param pp: PauliPolynomial to map
-    :param debug: If True, print debug information
     :return: Edge weights as a numpy array
     """
     num_qubits = pp.num_qubits
@@ -33,6 +29,13 @@ def edges_by_I_index(pp: PauliPolynomial):
     return edges
 
 def map_qubits_as_tree(correlations, pp, topo):
+    """ Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit. Connections are made as a tree structure. 
+    :param correlations: Correlation matrix between logical qubits
+    :param pp: PauliPolynomial to map
+    :param topo: Topology of the physical qubits
+    :return: mapping from logical qubits to physical qubits, and tree structure of physical qubits used in the mapping.
+    """
+
     num_logical_qubits = pp.num_qubits
     num_physical_qubits = topo.num_qubits
     mapped_logical_qubits = []
@@ -141,7 +144,10 @@ def map_qubits_as_tree(correlations, pp, topo):
     return mapping, tree
 
 def center_physical_qubit(topo):
-    """ Find qubit having max degree and max distance to the closest edge"""
+    """ Find qubit having max degree and max distance to the closest edge
+    :param topo: Topology of the physical qubits
+    :return: Index of the cetner physical qubit
+    """
     num_physical_qubits = topo.num_qubits
 
     # Find group of qubits having maximum degree, and group of qubits having degree of 1
@@ -183,6 +189,11 @@ def center_physical_qubit(topo):
     return max_distance_qubit
 
 def find_heaviest_logical_qubit(pp):
+    """ Find logical qubit having most connections.
+    :param pp: PauliPolynomial to map
+    :return: Index of heaviest logical qubit.
+    """
+
     max_conn = 0
     heaviest_logical_qubit = -1
     for i in range(pp.num_qubits):
@@ -195,7 +206,13 @@ def find_heaviest_logical_qubit(pp):
             heaviest_logical_qubit = i
     return heaviest_logical_qubit
 
+
 def complete_tree(topo):
+    """ Map all physical qubits to tree strucutre where root is the center physical qubit. 
+    :param topo: Topology of the physical qubits
+    :return: tree structure of physical qubits containing all physical qubits.
+    """
+
     num_physical_qubits = topo.num_qubits
     mapped_physical_qubits = []
     mapped_physical_qubit_depth = {}

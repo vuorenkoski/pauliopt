@@ -20,27 +20,50 @@ from tests.pauli.utils import verify_equality
 # where I is in the middle of non-I legs. From multiple step choices, one is selected which brings
 # non-resolved gadgets closer (removes legs in endings, or adds non-I leg to the middle)
 
-# Topology of the target device is fitted to a tree, so we usually all connections of device is not used. 
-# This tree must be provided for the algorithm. Every gadget is fitted to this tree and legs are removed 
-# from edges of that graph
+# Topology of the target device is fitted to a tree, so usually all connections of the device is not used. 
+# This tree must be provided for the algorithm (constructed by mapping algorithm). Every gadget is fitted 
+# to this tree and legs are removed from edges of that graph.
 
 # Time complexity O(num_gadgets * ((num_gadgets * num_qubits) + num_qubits * num_qubits * num_gadgets))
 # =O(num_gadgets^2 * num_qubits^2)
 
-def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False, random_sel=False):
+def pathfinder_in_pauli_grove(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False):
+    """ Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit. Connections are made as a tree structure. 
+    :param pp: PauliPolynomial to map
+    :param topo: Topology of the physical qubits
+    :param tree: Tree structure of physical qubits to be used in mapping. This is usually created by mapping algorithm.
+    :param print_order: Order of qubits to be printed in debug prints. If None, qubits are printed in numerical order.
+    :param debug: If True, debug prints are enabled. This includes printing gadget data after each step and selection of next gadget and edge.
+    :return: mapping from logical qubits to physical qubits, and tree structure of physical qubits used in the mapping.
+    """
+        
     num_qubits = pp.num_qubits
     num_gadgets = len(pp.pauli_gadgets)
     qc_out = Circuit(num_qubits)
     qc_prop = []
-    perm_gadgets = []
+    perm_gadgets = [] # Ordered list of gadgets removed
 
     # Create algorithm datastructures
-    last_leg = np.zeros((num_qubits), dtype=int) # Last leg of gadget before removal (for analysis)
-    gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8) # Matrix representing current status of paulipolynomial 
+
+    # Array of qubits showing count of gadgets where this qubit was last leg to be removed (for analysis purposes).
+    last_leg = np.zeros((num_qubits), dtype=int) 
+
+    # Matrix representing current status of paulipolynomial 0==I, 1==X, 2==Z, 3==Y.
+    gadget_data = np.zeros((num_qubits,num_gadgets), dtype=np.int8)
+
+    # Gadget angle
     gadget_angles = []
+
+    # Array representing removed gadgets. 1 if gadget is removed, 0 otherwise.
     removed_gadgets = np.zeros((num_gadgets), dtype=np.int8) # Array representing removed gadgets
-    gadget_graph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8) # Matrix representing degrees of gadget graph
-    gadget_graph_last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) # Matrix representing last edges in gadget graph
+
+    # Degree of nodes in gadget tree.
+    gadget_graph_degrees = np.zeros((num_gadgets, num_qubits), dtype=np.int8)
+
+    # Matrix representing last edges in gadget graph, -1 if this qubit is not a leaf in gadget graph.
+    # Otherwise, value is the neighbor of qubit in gadget graph.
+    gadget_graph_last_edge = np.zeros((num_gadgets, num_qubits), dtype=int) 
+
     for i,gadget in enumerate(pp.pauli_gadgets):
         for j in range(num_qubits):
             gadget_graph_last_edge[i,j] = -1
@@ -119,7 +142,12 @@ def shortest_path_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_
     return circ_out, perm_gadgets, permutation, {'pre-cx': pre_cx, 'tableau-cnot':qc_prop_syn_count}
 
 def graph_from_tree(gadget_data, tree):
-    """Create device topology from gadget tree structure."""
+    """Create device topology from gadget tree structure.
+    :param gadget_data: Matrix representing paulipolynomial
+    :param tree: Tree structure of physical qubits to be used in mapping. This is usually created by mapping algorithm
+    :return: NetworkX graph representing device topology apllied to tree strucute defined by tree parameter
+    """
+
     num_qubits, num_gadgets = gadget_data.shape
     root, tree_children = tree
     edges = []
@@ -131,7 +159,14 @@ def graph_from_tree(gadget_data, tree):
     return G
 
 def create_gadget_graph(gadget_data, tree, gadget_graph_degrees, gadget_graph_last_edge, gadget_index):
-    """Create gadget graph_data structures from gadget tree graph."""
+    """Update gadget graph_data, gadget_graph_last_edge and gadget_index structures from gadget tree graph.
+    :param gadget_data: Matrix representing paulipolynomial
+    :param tree: Tree structure of physical qubits to be used in mapping. This is usually created by mapping algorithm
+    :param gadget_graph_degrees: Matrix representing degrees of gadget graph. This is updated in place.
+    :param gadget_graph_last_edge: Matrix representing last edges in gadget graph. This is updated in place.
+    :param gadget_index: Index of the gadget for which the data is updated.
+    :return: None
+    """
     num_qubits = gadget_graph_degrees.shape[1]
     tree_graph = map_gadget_as_tree(gadget_data, tree, gadget_index)
     for j in range(num_qubits):
@@ -143,7 +178,14 @@ def create_gadget_graph(gadget_data, tree, gadget_graph_degrees, gadget_graph_la
             gadget_graph_degrees[gadget_index,j] = 0
 
 def check_for_singles(general_data, circ_data, perm_gadgets, last_leg):
-    """ check if there are gadgets having only single leg and remove them if so."""
+    """ Check if there are gadgets having only single leg and remove them if so.
+    :param general_data: Tuple containing datastructures on gadgets
+    :param circ_data: Tuple containing data on circuit being constructed, updated in place
+    :param perm_gadgets: Ordered list of removed gadgets, updated in place
+    :param last_leg: Array of qubits showing count of gadgets where this qubit was last leg to be removed (for analysis purposes).
+    :return: number of removed gadgets
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     removed_gadgets_num = 0
@@ -163,7 +205,15 @@ def check_for_singles(general_data, circ_data, perm_gadgets, last_leg):
     return removed_gadgets_num
 
 def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
-    """ Remove gadget having single leg indicated by gadget_index."""
+    """ Remove gadget indicated by gadget_index having single leg.
+    :param general_data: Tuple containing datastructures on gadgets
+    :param circ_data: Tuple containing data on circuit being constructed, updated in place
+    :param perm_gadgets: Ordered list of removed gadgets, updated in place
+    :param gadget_index: Gadget to be removed
+    :param qubit: Last leg to be temoved
+    :return: None
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     qc_out, qc_prop = circ_data
     pauli = gadget_data[qubit,gadget_index]
@@ -184,9 +234,12 @@ def remove_single(general_data, circ_data, perm_gadgets, gadget_index, qubit):
 
 
 def next_leg_to_remove(gadget_index, general_data):
-    """ Select next leg (edge+gate combination) to remove from gadget.
-    This can be also filling I in the middle of non-I legs.
-    time complexity O(num_gadgets * num_qubits)"""
+    """ Select next leg (edge+gate combination) to remove from gadget. This can be also filling I in the middle of non-I legs. time complexity O(num_gadgets * num_qubits)
+    :param gadget_index: Gadget from which next leg is to be reomved 
+    :param general_data: Tuple containing datastructures on gadgets
+    :return: Tree edge to be removed and gates needed for that.
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
 
@@ -266,7 +319,19 @@ def next_leg_to_remove(gadget_index, general_data):
     return edge, gates
 
 def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1, original_pauli0, original_pauli1):
-    """ Get score (leg change, middle I change) for given changes in pauli in given gadget and qubits."""
+    """ Score edge+gate combination in terms of how much it helps to remove legs of a gadget.
+    Get score (leg change, middle I change) for given changes in pauli in given gadget and qubits.
+    :param general_data: Tuple containing datastructures on gadgets
+    :param gadget_index: Gadget index
+    :param qubit0: Index of the first qubit
+    :param qubit1: Index of the second qubit
+    :param new_pauli0: Pauli operator of qubit0 after application of gates
+    :param new_pauli1: Pauli operator of qubit1 after application of gates
+    :param original_pauli0: Pauli operator of qubit0 before application of gates
+    :param original_pauli1: Pauli operator of qubit1 before application of gates
+    :return: Tupple (Edge legs turned to I, middle I:s turned to non-I pauli).
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     leg_change = 0
     middle_I_change = 0
@@ -295,8 +360,11 @@ def get_score(general_data, gadget_index, qubit0, qubit1, new_pauli0, new_pauli1
     return leg_change, middle_I_change
 
 def next_gadget(general_data):
-    """ Select closest gadget.
-        time complexity O(num_gadgets * num_qubits)"""
+    """ Select closest gadget. time complexity O(num_gadgets * num_qubits)
+    :param general_data: Tuple containing datastructures on gadgets
+    :return: Index of closest gadget.
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     num_qubits, num_gadgets = gadget_data.shape
     closest = -1
@@ -316,8 +384,17 @@ def next_gadget(general_data):
     return closest
 
 def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_gadgets, last_leg, device_topology):
-    """apply single qubit gates and CNOT to all non-removed gates.
-    time complexity O(num_gadgets)"""
+    """Apply single qubit gates and CNOT to all non-removed gates. Time complexity O(num_gadgets)
+    :param edge: Tupple of two qubits where gates are applied
+    :param gates: Tupple of two single qubit gates to be applied
+    :param general_data: Tuple containing datastructures on gadgets
+    :param circ_data: Tuple containing data on circuit being constructed, updated in place
+    :param perm_gadgets: Ordered list of removed gadgets, updated in place
+    :param last_leg: Array of qubits showing count of gadgets where this qubit was last leg to be removed (for analysis purposes).
+    :param device_topology: Tree graph represting device topology
+    :return: Number of removed gadgets
+    """
+
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
     qc_out, qc_prop = circ_data
     num_qubits, num_gadgets = gadget_data.shape
@@ -387,6 +464,16 @@ def add_cnot_and_single_qubit_gates(edge, gates, general_data, circ_data, perm_g
     return removed_gadgets_num
 
 def update_gadget_graph(general_data, gadget_index, qubit1, qubit2, pauli1, pauli2, device_topology):
+    """Update gadget data during propagation of the gates.
+    :param general_data: Tuple containing datastructures on gadgets
+    :param gadget_index: Index of gadget which data is to be updated
+    :param qubit1: Index of the first qubit
+    :param qubit2: Index of the second qubit
+    :param pauli1: Pauli operator of qubit1 after application of gates
+    :param pauli2: Pauli operator of qubit2 after application of gates
+    :param device_topology: Tree graph represting device topology
+    :return: True if gadget was removed, False otherwise
+    """
     gadget_data, gadget_angles, removed_gadgets, gadget_graph_degrees, gadget_graph_last_edge = general_data
 
     original_pauli1, original_pauli2 = gadget_data[qubit1,gadget_index], gadget_data[qubit2,gadget_index]
@@ -410,7 +497,7 @@ def update_gadget_graph(general_data, gadget_index, qubit1, qubit2, pauli1, paul
             gadget_graph_degrees[gadget_index,qubit1] -= 1
             gadget_graph_degrees[gadget_index,qubit2] -= 1
             if gadget_graph_degrees[gadget_index,qubit2] == 1:
-                gadget_graph_last_edge[gadget_index,qubit2] = find_edge(gadget_index, qubit2, gadget_graph_degrees, device_topology)
+                gadget_graph_last_edge[gadget_index,qubit2] = find_leaf_parent(gadget_index, qubit2, gadget_graph_degrees, device_topology)
         else:                                            # middle of chain, negative
             pass
     if pauli2 == 0b00 and original_pauli2 != 0b00: # deletion
@@ -418,13 +505,20 @@ def update_gadget_graph(general_data, gadget_index, qubit1, qubit2, pauli1, paul
             gadget_graph_degrees[gadget_index,qubit1] -= 1
             gadget_graph_degrees[gadget_index,qubit2] -= 1
             if gadget_graph_degrees[gadget_index,qubit1] == 1:
-                gadget_graph_last_edge[gadget_index,qubit1] = find_edge(gadget_index, qubit1, gadget_graph_degrees, device_topology)
+                gadget_graph_last_edge[gadget_index,qubit1] = find_leaf_parent(gadget_index, qubit1, gadget_graph_degrees, device_topology)
         else:                                            # middle of chain, negative
             pass
     return (gadget_graph_degrees[gadget_index,qubit1] == 0) and (gadget_graph_degrees[gadget_index,qubit2] == 0)
 
-def find_edge(gadget_index, qubit, gadget_graph_degrees, device_topology):
-    """ Find last edge connected to the qubit in gadget graph."""
+def find_leaf_parent(gadget_index, qubit, gadget_graph_degrees, device_topology):
+    """ Find the parent of the leaf node in gadget graph.
+    :param gadget_index: Index of gadget which data is to be updated
+    :param qubit: Index of the qubit
+    :param gadget_graph_degrees: Degrees of nodes in gadget graph
+    :param device_topology: Tree graph represting device topology
+    :return: True if gadget was removed, False otherwise
+    """
+
     for neighbor in device_topology.neighbors(qubit):
         if gadget_graph_degrees[gadget_index, neighbor] != 0:
             return neighbor
@@ -436,8 +530,12 @@ def find_edge(gadget_index, qubit, gadget_graph_degrees, device_topology):
     return -1
 
 def map_gadget_as_tree(gadget_data, tree, gadget_index):
-    """ Map gadget as tree graph by removing nodes which are not part of the gadget."""
-    """ Time complexity O(n)"""
+    """ Map gadget as tree graph by removing nodes from physical qubit tree which are not part of the gadget. Time complexity O(n).
+    :param gadget_data: Matrix representing paulipolynomial
+    :param tree: Tree structure of physical qubits to be used in mapping.
+    :param gadget_index: Index of gadget to be mapped
+    :return: NetworkX graph representing gadget as tree structure defined by tree parameter
+    """
     root, tree_children = tree
     nodes_to_remove = [] # Nodes which can be removed from tree
     remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_to_remove)
@@ -447,8 +545,14 @@ def map_gadget_as_tree(gadget_data, tree, gadget_index):
     return nx.Graph(edges)
 
 def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, nodes_to_remove):
-    """ Recursive check from leafs to root which branches can be removed."""
-    """ Time complexity O(n)"""
+    """ Recursive check from leafs to root which branches can be removed.Time complexity O(n)
+    :param gadget_data: Matrix representing paulipolynomial
+    :param gadget_index: Index of gadget to be mapped
+    :param tree_children: Structure holding list of children for each node in tree
+    :param root: Current node in tree
+    :param nodes_to_remove: Nodes which can be removed from tree, updated in place
+    :return: True if node can be removed, False otherwise"""
+
     # If there is no children and node is I, it can be removed
     if tree_children[root] is None:
         if gadget_data[root,gadget_index] == 0b00:
@@ -456,6 +560,7 @@ def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, node
             return True
         else:
             return False
+        
     # Check all children, if all are removable and node is I, it can be removed
     non_removable_branches = 0
     for node in tree_children[root]:
@@ -468,8 +573,14 @@ def remove_nodes_from_leafs(gadget_data, gadget_index, tree_children, root, node
     return False
 
 def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes_to_remove):
-    """ Recursively check if root node can be removed due to fact that it has only single branch."""
-    """ Time complexity O(n)"""
+    """ Recursively check if root node can be removed due to fact that it has only single branch. Time complexity O(n)
+    :param gadget_data: Matrix representing paulipolynomial
+    :param gadget_index: Index of gadget to be mapped
+    :param tree_children: Structure holding list of children for each node in tree
+    :param root: Current node in tree
+    :param nodes_to_remove: Nodes which can be removed from tree, updated in place
+    :return: None"""
+
     # If there is no children and node is I do nothing
     if tree_children[root] is None or gadget_data[root,gadget_index] != 0b00:
         return
@@ -486,8 +597,13 @@ def remove_nodes_from_root(gadget_data, gadget_index, tree_children, root, nodes
         remove_nodes_from_root(gadget_data, gadget_index, tree_children, branch, nodes_to_remove)
 
 def list_edges(tree_children, root, nodes_to_remove, edges):
-    """ List edges from tree excluding removed nodes."""
-    """ Time complexity O(n)"""
+    """ List edges from tree excluding removed nodes. Time complexity O(n)
+    :param tree_children: Structure holding list of children for each node in tree
+    :param root: Current node in tree
+    :param nodes_to_remove: Nodes which can be removed from tree, updated in place
+    :param edges: List of edges in tree, updated in place
+    :return: None"""
+
     if tree_children[root] is None:
         return
     for node in tree_children[root]:
@@ -497,7 +613,12 @@ def list_edges(tree_children, root, nodes_to_remove, edges):
         list_edges(tree_children, node, nodes_to_remove, edges)
 
 def gadget_graph_size(gadget_data, gadget_graph_degrees, gadget_index):
-    """ Defines number of middle I nodes and regular nodes of gadget graph."""
+    """ Defines number of middle I nodes and regular nodes of gadget graph.
+    :param gadget_data: Matrix representing paulipolynomial
+    :param gadget_graph_degrees: Matrix representing degrees of gadget graph nodes
+    :param gadget_index: Index of gadget to be mapped
+    :return: Tupple (number of middle I nodes, number of regular nodes)"""
+
     num_qubits = gadget_data.shape[0]
     nodes = 0
     I_nodes = 0
@@ -509,37 +630,66 @@ def gadget_graph_size(gadget_data, gadget_graph_degrees, gadget_index):
     return I_nodes, nodes
 
 def apply_v(p): # z,z xor x
+    """Apply V gate to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     phase = 1
     if p == 0b10:
         phase = -1
     return (0b10 & p) | ((0b01 & p) ^ (p >> 1)), phase
 
 def apply_s(p): # z xor x, x
+    """Apply S gate to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     phase = 1
     if p == 0b11:
         phase = -1
     return 0b01 & p | ((0b10 & p) ^ ((p & 0b01) << 1)), phase
 
 def apply_I(p):
+    """Apply I gate to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     return p, 1
 
 def apply_sv(p):
+    """Apply SV gates to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     pauli,phase1 = apply_s(p)
     pauli,phase2 = apply_v(pauli)
     return pauli, phase1*phase2
 
 def apply_vs(p):
+    """Apply VS gates to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     pauli,phase1 = apply_v(p)
     pauli,phase2 = apply_s(pauli)
     return pauli, phase1*phase2
 
 def apply_svs(p):
+    """Apply SVS gates to Pauli operator represented as 2-bit integer. Returns new Pauli and phase change.
+    :param p: Pauli operator represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator, phase change)"""
+
     pauli,phase1 = apply_s(p)
     pauli,phase2 = apply_v(pauli)
     pauli,phase3 = apply_s(pauli)
     return pauli, phase1*phase2*phase3
 
 def apply_cnot(p1, p2):
+    """Apply CNOT gate to two Pauli operators represented as 2-bit integers. Returns new Paulis and phase change.
+    :param p1: Pauli operator of control qubit represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :param p2: Pauli operator of target qubit represented as 2-bit integer (00=I, 01=X, 10=Z, 11=Y)
+    :return: Tupple (new Pauli operator of control qubit, new Pauli operator of target qubit, phase change)"""
+
     phase = 1
     if (p1 == 0b01 and p2 == 0b10) or (p1 == 0b11 and p2 == 0b11):
         phase = -1
@@ -547,15 +697,12 @@ def apply_cnot(p1, p2):
     pauli2 = ((p1 ^ p2) & 0b01) | (p2 & 0b10)
     return pauli1, pauli2, phase
 
-def check_circuit_equivalence(pp, circ_out, gadget_perm, perm):
-    """Check if the circuit is equivalent to the circuit produced by cbnot-ladders from PauliPolynomial."""
-    pp2 = PauliPolynomial(pp.num_qubits)
-    pp2.pauli_gadgets = [pp[i].copy() for i in gadget_perm]
-    circ = circ_out.to_qiskit()
-    pp_circ = pp2.to_qiskit()
-    return verify_equality(pp_circ,circ)
-
 def print_sorted_gd(gadget_data, order=None):
+    """Print gadget data in sorted order.
+    :param gadget_data: Matrix representing paulipolynomial
+    :param order: Order of gadgets to be printed. If None, trivial order is used
+    :return: None"""
+
     num_qubits, num_gadgets = gadget_data.shape
     if order is None:
         order = [i for i in range(num_gadgets)]
