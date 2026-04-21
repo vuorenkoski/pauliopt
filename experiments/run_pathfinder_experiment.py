@@ -80,7 +80,6 @@ def random_pauli_experiment(backend, methods, logical_qubits=None, nr_gadgets=10
                         } | benchmarks | {'time': mapping_time + int((time.time()-start) * 1000)}
                 df.loc[len(df)] = column
                 
-#                print(column)
                 start = time.time()
                 circ_out, gadget_perm, perm, benchmarks = synth_method(pp_r.copy(), topo, tree_r)
                 if verify:

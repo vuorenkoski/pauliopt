@@ -126,7 +126,7 @@ def synth_pp_pathfinder_in_pauli_grove_mapping(pp: PauliPolynomial, topo: Topolo
 def synth_pp_pathfinder_in_pauli_grove(pp: PauliPolynomial, topo: Topology):
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
 #    map_r = random_mapping(topo)
-    tree_c = complete_tree(topo) # This is needed for forest synth with random mapping
+    tree_c = complete_tree(topo) # This is needed for forest synth without mapping algorithm
 #    pp_m = permute_with_mapping(map_r, pp, topo.num_qubits)
     circ_out, gadget_perm, perm, benchmarks = pathfinder_in_pauli_grove(pp, topo, tree_c)
     return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 

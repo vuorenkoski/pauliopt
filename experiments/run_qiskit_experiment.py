@@ -151,13 +151,6 @@ print('Logical qubits:', logical_qubits)
 print('Gadgets:', gadgets)
 print('Rounds per setting:', rounds)
 random.seed(seed)
-#pp = create_random_pauli_polynomial(logical_qubits, num_gadgets)
-#pp = simplify_pauli_polynomial(pp, allow_acs=True)
-
-#print_pp(pp)
-#print_angles = [g.angle for g in pp.pauli_gadgets]
-#print("Angles:", print_angles)
-
 results = experiment(logical_qubits, gadgets, qiskit_backend, rounds)
 print(results)
 print('--------------experiment end----------------\n')

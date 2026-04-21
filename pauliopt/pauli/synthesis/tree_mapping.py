@@ -282,6 +282,11 @@ def complete_tree(topo):
     return tree
 
 def qubit_correlations(pp):
+    """ Measure correlations between logical qubits. Correlations represents number of gadgets having both qubits non-I.
+    :param pp: PauliPolynomial to map
+    :return: Matrix represeting correlations.
+    """
+
     correlations = np.zeros((pp.num_qubits, pp.num_qubits), dtype=int)
     for gadget in pp.pauli_gadgets:
         for i in range(pp.num_qubits):
