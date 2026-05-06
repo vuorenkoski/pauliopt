@@ -7,7 +7,7 @@ import tqdm
 import pandas as pd
 
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
-from pauliopt.pauli.synthesis.pathfinder_in_pauli_grove import pathfinder_in_pauli_grove
+from pauliopt.pauli.synthesis.shortest_path_in_pauli_forest import shortest_path_in_pauli_forest
 
 from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping, complete_tree
 from pauliopt.topologies import Topology
@@ -116,25 +116,25 @@ def synth_pp_pauliopt_steiner_gray(pp: PauliPolynomial, topo: Topology):
     circ_out, gadget_perm, perm, benchmarks = pauli_polynomial_steiner_gray_clifford(pp, topo, None)
     return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks
 
-def synth_pp_pathfinder_in_pauli_grove_mapping(pp: PauliPolynomial, topo: Topology):
+def synth_pp_shortest_path_in_pauli_forest_mapping(pp: PauliPolynomial, topo: Topology):
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
     mapping, tree = pauli_tree_mapping(pp, topo)
     pp_m = permute_with_mapping(mapping, pp, topo.num_qubits)
-    circ_out, gadget_perm, perm, benchmarks = pathfinder_in_pauli_grove(pp_m, topo, tree)
+    circ_out, gadget_perm, perm, benchmarks = shortest_path_in_pauli_forest(pp_m, topo, tree)
     return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 
 
-def synth_pp_pathfinder_in_pauli_grove(pp: PauliPolynomial, topo: Topology):
+def synth_pp_shortest_path_in_pauli_forest(pp: PauliPolynomial, topo: Topology):
     pp = simplify_pauli_polynomial(pp, allow_acs=True)
 #    map_r = random_mapping(topo)
     tree_c = complete_tree(topo) # This is needed for forest synth without mapping algorithm
 #    pp_m = permute_with_mapping(map_r, pp, topo.num_qubits)
-    circ_out, gadget_perm, perm, benchmarks = pathfinder_in_pauli_grove(pp, topo, tree_c)
+    circ_out, gadget_perm, perm, benchmarks = shortest_path_in_pauli_forest(pp, topo, tree_c)
     return {'cx': cnot_count(circ_out), 'cx-depth': cnot_depth(circ_out)} | benchmarks 
 
 SYNTHESIS_METHODS = {
     "pauliopt_steiner_gray": synth_pp_pauliopt_steiner_gray,
-    "pathfinder_in_pauli_grove_mapping": synth_pp_pathfinder_in_pauli_grove_mapping,
-    "pathfinder_in_pauli_grove": synth_pp_pathfinder_in_pauli_grove,
+    "shortest_path_in_pauli_forest_mapping": synth_pp_shortest_path_in_pauli_forest_mapping,
+    "shortest_path_in_pauli_forest": synth_pp_shortest_path_in_pauli_forest,
     }
 
 def threaded_real_hw_ucc_evaluation(max_qubits=30):

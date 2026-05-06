@@ -18,7 +18,7 @@ from pytket.placement import GraphPlacement
 from utils import create_random_pauli_polynomial, pp_to_list_qiskit, permute_with_mapping
 from utils import two_qubit_gates_qiskit, two_qubit_gates_tket, pp_to_pytket_box, two_qubit_gates_pauliopt, topo_from_ibm_backend
 from pauliopt.pauli.simplification.simple_simplify import simplify_pauli_polynomial
-from pauliopt.pauli.synthesis.pathfinder_in_pauli_grove import pathfinder_in_pauli_grove
+from pauliopt.pauli.synthesis.shortest_path_in_pauli_forest import shortest_path_in_pauli_forest
 from pauliopt.pauli.synthesis.tree_mapping import pauli_tree_mapping
 from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_steiner_gray_clifford
 
@@ -77,13 +77,13 @@ def tket_test(pp, qiskit_backend):
     resp = {'method':'TKET','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
     return resp
 
-def ppg_test(pp, qiskit_backend):
+def sppf_test(pp, qiskit_backend):
     topo = topo_from_ibm_backend(qiskit_backend)
 
     start = time.time()
     mapping, tree = pauli_tree_mapping(pp, topo)
     pp_m = permute_with_mapping(mapping, pp, topo.num_qubits)
-    circ_out, gadget_perm, perm, benchmarks = pathfinder_in_pauli_grove(pp_m, topo, tree)
+    circ_out, gadget_perm, perm, benchmarks = shortest_path_in_pauli_forest(pp_m, topo, tree)
     elapsed_time = time.time() - start
     results = two_qubit_gates_pauliopt(circ_out)
     resp = {'method':'PPG', 'routed': results, 'time': round(elapsed_time*1000), 'benchmarks': benchmarks}
@@ -122,7 +122,7 @@ def experiment(num_qubits, gadgets, qiskit_backend, rounds):
                             'count': results['routed']['count'], 'depth': results['routed']['depth'], 
                             'time': results['time']}
 
-            results = ppg_test(pp, qiskit_backend)
+            results = sppf_test(pp, qiskit_backend)
             df.loc[len(df)] = {'n_rep': i, 'num_qubits': num_qubits, 'num_gadgets': num_gadgets, 'method': results['method'],
                             'count': results['routed']['count'], 'depth': results['routed']['depth'], 
                             'time': results['time']}

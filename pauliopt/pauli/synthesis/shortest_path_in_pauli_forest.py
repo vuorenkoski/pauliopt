@@ -26,7 +26,7 @@ from tests.pauli.utils import verify_equality
 # Time complexity O(num_gadgets * ((num_gadgets * num_qubits) + num_qubits * num_qubits * num_gadgets))
 # =O(num_gadgets^2 * num_qubits^2)
 
-def pathfinder_in_pauli_grove(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False):
+def shortest_path_in_pauli_forest(pp: PauliPolynomial, topo: Topology, tree, print_order=None, debug=False):
     """ Mapping starts from center and heaviest logical qubit (Most legs). Maping continues to logical qubit which have most common non-I legs with mapped qubit. Connections are made as a tree structure. 
     :param pp: PauliPolynomial to map
     :param topo: Topology of the physical qubits
