@@ -1,4 +1,4 @@
-# Python scripts to run the experiments on Pathfinder of Puali Grove -algorithm
+# Python scripts to run the experiments on Shortest Path in Pauli Forest -algorithm
 
 ## Algorithms
 

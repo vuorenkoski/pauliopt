@@ -86,7 +86,7 @@ def sppf_test(pp, qiskit_backend):
     circ_out, gadget_perm, perm, benchmarks = shortest_path_in_pauli_forest(pp_m, topo, tree)
     elapsed_time = time.time() - start
     results = two_qubit_gates_pauliopt(circ_out)
-    resp = {'method':'PPG', 'routed': results, 'time': round(elapsed_time*1000), 'benchmarks': benchmarks}
+    resp = {'method':'SPPF', 'routed': results, 'time': round(elapsed_time*1000), 'benchmarks': benchmarks}
     return resp
 
 def sgc_test(pp, qiskit_backend):
