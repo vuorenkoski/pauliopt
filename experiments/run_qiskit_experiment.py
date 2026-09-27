@@ -25,14 +25,14 @@ from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_ste
 
 
 def qiskit_default_test(pp, qiskit_backend):
-    hls_config = HLSConfig(PauliEvolution=[('default', {'preserve_order': True, 'optimize_count': True, 
+    hls_config = HLSConfig(PauliEvolution=[('default', {'preserve_order': False, 'optimize_count': True, 
                                                         'upto_phase': True, 'resynth_clifford_method': 2})])
     results1, results2, elapsed_time = qiskit_test(pp, qiskit_backend, hls_config)
     resp = {'method':'Qiskit-default','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
     return resp
 
 def qiskit_rustiq_test(pp, qiskit_backend):
-    hls_config = HLSConfig(PauliEvolution=[('rustiq', {'preserve_order': True, 'optimize_count': True, 
+    hls_config = HLSConfig(PauliEvolution=[('rustiq', {'preserve_order': False, 'optimize_count': True, 
                                                         'upto_phase': True, 'resynth_clifford_method': 2})])
     results1, results2, elapsed_time = qiskit_test(pp, qiskit_backend, hls_config)
     resp = {'method':'Qiskit-rustiq','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
