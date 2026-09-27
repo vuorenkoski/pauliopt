@@ -1,12 +1,13 @@
 import random, time
 import pandas as pd
 
+from qiskit.transpiler.passes import HLSConfig
 from qiskit.quantum_info import SparsePauliOp
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.transpiler.passes.synthesis.hls_plugins import PauliEvolutionSynthesisRustiq
 from qiskit_ibm_runtime.fake_provider import FakeGuadalupeV2, FakeBrisbane
 from qiskit.transpiler import generate_preset_pass_manager
-from qiskit.synthesis import LieTrotter
+from qiskit.synthesis import LieTrotter, EvolutionSynthesis
 from qiskit.circuit import QuantumCircuit
 
 from pytket.circuit import TermSequenceBox
@@ -24,42 +25,39 @@ from pauliopt.pauli.synthesis.steiner_gray_synthesis import pauli_polynomial_ste
 
 
 def qiskit_default_test(pp, qiskit_backend):
+    hls_config = HLSConfig(PauliEvolution=[('default', {'preserve_order': True, 'optimize_count': True, 
+                                                        'upto_phase': True, 'resynth_clifford_method': 2})])
+    results1, results2, elapsed_time = qiskit_test(pp, qiskit_backend, hls_config)
+    resp = {'method':'Qiskit-default','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
+    return resp
+
+def qiskit_rustiq_test(pp, qiskit_backend):
+    hls_config = HLSConfig(PauliEvolution=[('rustiq', {'preserve_order': True, 'optimize_count': True, 
+                                                        'upto_phase': True, 'resynth_clifford_method': 2})])
+    results1, results2, elapsed_time = qiskit_test(pp, qiskit_backend, hls_config)
+    resp = {'method':'Qiskit-rustiq','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
+    return resp
+
+def qiskit_test(pp, qiskit_backend, hls_config):
     pass_manager = generate_preset_pass_manager(
         optimization_level=3,
         backend=qiskit_backend,
         layout_method="sabre",
         routing_method="sabre",
+        hls_config=hls_config,
     )
     pauli_op = SparsePauliOp.from_list(pp_to_list_qiskit(pp))
-    evolution_gate = PauliEvolutionGate(pauli_op)
+    evolution_gate = PauliEvolutionGate(pauli_op, time=1.0)
 
     start = time.time()
     circuit = QuantumCircuit(pp.num_qubits)
     circuit.append(evolution_gate, range(pp.num_qubits))
-    transpiled_qc = pass_manager.run(circuit)
-    elapsed_time = time.time() - start
-    results1 = two_qubit_gates_qiskit(circuit)
-    results2 = two_qubit_gates_qiskit(transpiled_qc)
-    resp = {'method':'Qiskit','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
-    return resp
 
-def qiskit_rustiq_test(pp, qiskit_backend):
-    pass_manager = generate_preset_pass_manager(
-        optimization_level=3,
-        backend=qiskit_backend,
-        layout_method="sabre",
-        routing_method="sabre",
-    )
-    pauli_op = SparsePauliOp.from_list(pp_to_list_qiskit(pp))
-    evolution_gate = PauliEvolutionGate(pauli_op)
-    start = time.time()
-    circuit = PauliEvolutionSynthesisRustiq().run(evolution_gate, preserve_order=False, optimize_count=True, resynth_clifford_method=2)
     transpiled_qc = pass_manager.run(circuit)
     elapsed_time = time.time() - start
     results1 = two_qubit_gates_qiskit(circuit)
     results2 = two_qubit_gates_qiskit(transpiled_qc)
-    resp = {'method':'Qiskit-Rustiq','synthesis': results1, 'routed': results2, 'time': round(elapsed_time*1000)}
-    return resp
+    return results1, results2, elapsed_time
 
 def tket_test(pp, qiskit_backend):
     coupling_map = qiskit_backend.coupling_map.get_edges()
@@ -116,7 +114,6 @@ def experiment(num_qubits, gadgets, qiskit_backend, rounds):
             df.loc[len(df)] = {'n_rep': i, 'num_qubits': num_qubits, 'num_gadgets': num_gadgets, 'method': results['method'],
                             'count': results['routed']['count'], 'depth': results['routed']['depth'], 
                             'time': results['time']}
-
             results = tket_test(pp, qiskit_backend)
             df.loc[len(df)] = {'n_rep': i, 'num_qubits': num_qubits, 'num_gadgets': num_gadgets, 'method': results['method'],
                             'count': results['routed']['count'], 'depth': results['routed']['depth'], 
@@ -142,7 +139,7 @@ seed = 42
 # max 80/150, 30/500 
 logical_qubits = 16
 # gadgets = [10,20,30,40,50,60,70,80,90,100]
-gadgets = [10,20]
+gadgets = [20]
 rounds = 20
 
 print('\n--------------experiment start----------------')
